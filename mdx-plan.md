@@ -267,7 +267,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] TOC respects config width and side
 - [ ] Works with no headings in document
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

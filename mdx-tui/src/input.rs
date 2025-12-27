@@ -39,7 +39,75 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Quit);
     }
 
-    // Navigation commands
+    // Handle TOC-specific keys when TOC is focused
+    if app.toc_focus {
+        match key {
+            // j - move down in TOC
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_move_down();
+                return Ok(Action::Continue);
+            }
+
+            // k - move up in TOC
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_move_up();
+                return Ok(Action::Continue);
+            }
+
+            // Enter or l - jump to selected heading
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('l'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_jump_to_selected(viewport_height);
+                app.toc_focus = false; // Return focus to document
+                return Ok(Action::Continue);
+            }
+
+            // T or Esc - close TOC
+            KeyEvent {
+                code: KeyCode::Char('T'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                app.toggle_toc();
+                return Ok(Action::Continue);
+            }
+
+            _ => {}
+        }
+    }
+
+    // T - toggle TOC
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('T'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.toggle_toc();
+        return Ok(Action::Continue);
+    }
+
+    // Navigation commands (when not in TOC)
     match key {
         // j - move down
         KeyEvent {

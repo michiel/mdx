@@ -35,16 +35,23 @@ pub struct App {
     pub config: Config,
     pub doc: Document,
     pub view: ViewState,
+    pub show_toc: bool,
+    pub toc_focus: bool,
+    pub toc_selected: usize,
     pub should_quit: bool,
 }
 
 impl App {
     /// Create a new application instance with a document
     pub fn new(config: Config, doc: Document) -> Self {
+        let show_toc = config.toc.enabled;
         Self {
             config,
             doc,
             view: ViewState::new(),
+            show_toc,
+            toc_focus: false,
+            toc_selected: 0,
             should_quit: false,
         }
     }
@@ -96,6 +103,55 @@ impl App {
         else if cursor >= scroll + viewport_height {
             self.view.scroll_line = cursor.saturating_sub(viewport_height - 1);
         }
+    }
+
+    /// Toggle TOC visibility and focus
+    pub fn toggle_toc(&mut self) {
+        if self.show_toc {
+            // If already shown, hide it
+            self.show_toc = false;
+            self.toc_focus = false;
+        } else {
+            // Show and focus TOC
+            self.show_toc = true;
+            self.toc_focus = true;
+        }
+    }
+
+    /// Move TOC selection down
+    pub fn toc_move_down(&mut self) {
+        if !self.doc.headings.is_empty() {
+            self.toc_selected = (self.toc_selected + 1).min(self.doc.headings.len() - 1);
+        }
+    }
+
+    /// Move TOC selection up
+    pub fn toc_move_up(&mut self) {
+        self.toc_selected = self.toc_selected.saturating_sub(1);
+    }
+
+    /// Jump to the selected heading in TOC
+    pub fn toc_jump_to_selected(&mut self, viewport_height: usize) {
+        if let Some(heading) = self.doc.headings.get(self.toc_selected) {
+            self.jump_to_line(heading.line);
+            self.auto_scroll(viewport_height);
+        }
+    }
+
+    /// Get the index of the current heading based on cursor position
+    pub fn current_heading_index(&self) -> Option<usize> {
+        if self.doc.headings.is_empty() {
+            return None;
+        }
+
+        // Find the last heading that's at or before the cursor
+        for (i, heading) in self.doc.headings.iter().enumerate().rev() {
+            if heading.line <= self.view.cursor_line {
+                return Some(i);
+            }
+        }
+
+        None
     }
 }
 
@@ -261,5 +317,115 @@ mod tests {
 
         app.move_cursor_up(1);
         assert_eq!(app.view.cursor_line, 0);
+    }
+
+    #[test]
+    fn test_toggle_toc() {
+        let config = Config::default();
+        let doc = create_test_doc(10);
+        let mut app = App::new(config, doc);
+
+        // Initially shown (from config default)
+        assert!(app.show_toc);
+        assert!(!app.toc_focus);
+
+        // Toggle - should hide
+        app.toggle_toc();
+        assert!(!app.show_toc);
+        assert!(!app.toc_focus);
+
+        // Toggle again - should show and focus
+        app.toggle_toc();
+        assert!(app.show_toc);
+        assert!(app.toc_focus);
+    }
+
+    #[test]
+    fn test_toc_navigation() {
+        let config = Config::default();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "# Heading 1\nSome text\n## Heading 2\nMore text\n### Heading 3"
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let doc = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc);
+
+        assert_eq!(app.toc_selected, 0);
+
+        // Move down in TOC
+        app.toc_move_down();
+        assert_eq!(app.toc_selected, 1);
+
+        app.toc_move_down();
+        assert_eq!(app.toc_selected, 2);
+
+        // Try to move beyond last heading
+        app.toc_move_down();
+        assert_eq!(app.toc_selected, 2); // Should stay at 2
+
+        // Move up
+        app.toc_move_up();
+        assert_eq!(app.toc_selected, 1);
+
+        app.toc_move_up();
+        assert_eq!(app.toc_selected, 0);
+
+        // Try to move above first heading
+        app.toc_move_up();
+        assert_eq!(app.toc_selected, 0); // Should stay at 0
+    }
+
+    #[test]
+    fn test_toc_jump_to_heading() {
+        let config = Config::default();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "# Heading 1\nSome text\n## Heading 2\nMore text\n### Heading 3"
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let doc = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc);
+
+        // Jump to second heading
+        app.toc_selected = 1;
+        app.toc_jump_to_selected(10);
+
+        // Heading 2 should be at line 2 (0-indexed)
+        assert_eq!(app.view.cursor_line, 2);
+    }
+
+    #[test]
+    fn test_current_heading_index() {
+        let config = Config::default();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "# Heading 1\ntext\ntext\n## Heading 2\ntext\n### Heading 3\ntext"
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let doc = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc);
+
+        // At line 0 - should be heading 0
+        app.view.cursor_line = 0;
+        assert_eq!(app.current_heading_index(), Some(0));
+
+        // At line 2 (still under heading 1)
+        app.view.cursor_line = 2;
+        assert_eq!(app.current_heading_index(), Some(0));
+
+        // At line 3 (heading 2)
+        app.view.cursor_line = 3;
+        assert_eq!(app.current_heading_index(), Some(1));
+
+        // At line 5 (heading 3)
+        app.view.cursor_line = 5;
+        assert_eq!(app.current_heading_index(), Some(2));
     }
 }
