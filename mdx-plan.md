@@ -173,7 +173,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Terminal state restored after exit
 - [ ] Status bar displays correct filename
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

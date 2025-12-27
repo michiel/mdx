@@ -1,7 +1,9 @@
 //! MDX - A fast TUI Markdown viewer with Vim-style navigation
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
+use mdx_core::{Config, Document};
+use mdx_tui::App;
 use std::path::PathBuf;
 
 /// A fast TUI Markdown viewer
@@ -15,11 +17,20 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    let _args = Args::parse();
+    let args = Args::parse();
 
-    // TODO: Implementation in Stage 3
-    println!("MDX - Implementation in progress");
-    println!("Stage 0: Project scaffold complete!");
+    // Load configuration
+    let config = Config::load().context("Failed to load configuration")?;
+
+    // Load document
+    let doc = Document::load(&args.file)
+        .with_context(|| format!("Failed to load document: {}", args.file.display()))?;
+
+    // Create app
+    let app = App::new(config, doc);
+
+    // Run TUI
+    mdx_tui::run(app).context("TUI application error")?;
 
     Ok(())
 }
