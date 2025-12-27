@@ -1,6 +1,7 @@
 //! Application state
 
-use mdx_core::{Config, Document, LineSelection};
+use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
+use crate::theme::Theme;
 
 /// Application mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,8 @@ pub struct App {
     pub config: Config,
     pub doc: Document,
     pub view: ViewState,
+    pub theme: Theme,
+    pub theme_variant: ThemeVariant,
     pub show_toc: bool,
     pub toc_focus: bool,
     pub toc_selected: usize,
@@ -45,10 +48,14 @@ impl App {
     /// Create a new application instance with a document
     pub fn new(config: Config, doc: Document) -> Self {
         let show_toc = config.toc.enabled;
+        let theme_variant = config.theme;
+        let theme = Theme::for_variant(theme_variant);
         Self {
             config,
             doc,
             view: ViewState::new(),
+            theme,
+            theme_variant,
             show_toc,
             toc_focus: false,
             toc_selected: 0,
@@ -103,6 +110,15 @@ impl App {
         else if cursor >= scroll + viewport_height {
             self.view.scroll_line = cursor.saturating_sub(viewport_height - 1);
         }
+    }
+
+    /// Toggle between dark and light themes
+    pub fn toggle_theme(&mut self) {
+        self.theme_variant = match self.theme_variant {
+            ThemeVariant::Dark => ThemeVariant::Light,
+            ThemeVariant::Light => ThemeVariant::Dark,
+        };
+        self.theme = Theme::for_variant(self.theme_variant);
     }
 
     /// Toggle TOC visibility and focus

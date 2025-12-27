@@ -107,6 +107,19 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Continue);
     }
 
+    // M - toggle theme
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('M'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.toggle_theme();
+        return Ok(Action::Continue);
+    }
+
     // Navigation commands (when not in TOC)
     match key {
         // j - move down

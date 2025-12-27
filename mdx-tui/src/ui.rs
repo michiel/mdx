@@ -75,18 +75,18 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             if idx == cursor {
                 Line::from(text.to_string()).style(
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::LightYellow)
+                        .fg(app.theme.base.fg.unwrap_or(Color::White))
+                        .bg(app.theme.cursor_line_bg)
                 )
             } else {
-                Line::from(text.to_string())
+                Line::from(text.to_string()).style(app.theme.base)
             }
         })
         .collect();
 
     let paragraph = Paragraph::new(lines)
         .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().fg(Color::White));
+        .style(app.theme.base);
 
     frame.render_widget(paragraph, area);
 }
@@ -109,21 +109,16 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             // Highlight selected or current heading
             if app.toc_focus && idx == app.toc_selected {
                 // Selected in TOC focus mode
-                Line::from(text).style(
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::LightCyan)
-                        .add_modifier(Modifier::BOLD),
-                )
+                Line::from(text).style(app.theme.toc_active)
             } else if !app.toc_focus && Some(idx) == current_heading {
                 // Current heading when not focused
                 Line::from(text).style(
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(app.theme.toc_active.bg.unwrap_or(Color::Cyan))
                         .add_modifier(Modifier::BOLD),
                 )
             } else {
-                Line::from(text).style(Style::default().fg(Color::White))
+                Line::from(text).style(app.theme.base)
             }
         })
         .collect();
@@ -136,9 +131,9 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let border_style = if app.toc_focus {
-        Style::default().fg(Color::LightCyan)
+        Style::default().fg(app.theme.toc_active.bg.unwrap_or(Color::LightCyan))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(app.theme.toc_border)
     };
 
     let toc_widget = Paragraph::new(toc_lines)
@@ -148,7 +143,7 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .border_style(border_style)
                 .title(title),
         )
-        .style(Style::default().fg(Color::White));
+        .style(app.theme.base);
 
     frame.render_widget(toc_widget, area);
 }
@@ -179,16 +174,21 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         ""
     };
 
+    let theme_str = match app.theme_variant {
+        mdx_core::config::ThemeVariant::Dark => "DARK",
+        mdx_core::config::ThemeVariant::Light => "LIGHT",
+    };
+
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}]{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, toc_indicator
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}]{}  [{}]",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str, toc_indicator, theme_str
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(
         status_text,
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::LightBlue)
+            .fg(app.theme.status_bar_fg)
+            .bg(app.theme.status_bar_bg)
             .add_modifier(Modifier::BOLD),
     )]));
 

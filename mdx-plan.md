@@ -306,7 +306,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Config default theme loads correctly
 - [ ] Theme persists across reloads (or resets - clarify)
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
