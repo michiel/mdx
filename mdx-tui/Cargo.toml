@@ -1,0 +1,32 @@
+[package]
+name = "mdx-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["clipboard", "watch", "git"]
+clipboard = ["mdx-core/clipboard"]
+watch = ["mdx-core/watch"]
+git = ["mdx-core/git"]
+
+[dependencies]
+# Core crate
+mdx-core = { path = "../mdx-core" }
+
+# Terminal UI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+unicode-width = { workspace = true }
+tui-markdown = { workspace = true }
+
+# Event bus
+crossbeam-channel = { workspace = true }
+
+# LRU cache
+lru = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }

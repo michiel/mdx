@@ -1,0 +1,24 @@
+[package]
+name = "mdx"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["clipboard", "watch", "git"]
+clipboard = ["mdx-tui/clipboard"]
+watch = ["mdx-tui/watch"]
+git = ["mdx-tui/git"]
+
+[dependencies]
+# Local crates
+mdx-core = { path = "../mdx-core" }
+mdx-tui = { path = "../mdx-tui" }
+
+# CLI parsing
+clap = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }

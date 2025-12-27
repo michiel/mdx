@@ -1,0 +1,39 @@
+[package]
+name = "mdx-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["clipboard", "watch", "git"]
+clipboard = ["dep:arboard"]
+watch = ["dep:notify"]
+git = ["dep:similar", "dep:gix", "dep:bstr"]
+
+[dependencies]
+# Core text handling
+ropey = { workspace = true }
+pulldown-cmark = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Platform config directories
+directories = { workspace = true }
+
+# Optional: Clipboard
+arboard = { workspace = true, optional = true }
+
+# Optional: File watching
+notify = { workspace = true, optional = true }
+
+# Optional: Git diff
+similar = { workspace = true, optional = true }
+gix = { workspace = true, optional = true }
+bstr = { workspace = true, optional = true }

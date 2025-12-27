@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "mdx-core",
+    "mdx-tui",
+    "mdx",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["MDX Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-repo/mdx"
+
+[workspace.dependencies]
+# Core text handling
+ropey = "1.6"
+pulldown-cmark = "0.11"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Error handling
+anyhow = "1.0"
+
+# Terminal UI
+ratatui = "0.28"
+crossterm = "0.28"
+unicode-width = "0.1"
+
+# Markdown rendering for TUI
+tui-markdown = "0.3"
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Platform config directories
+directories = "5.0"
+
+# Clipboard
+arboard = "3.4"
+
+# File watching
+notify = "6.1"
+
+# Git diff
+similar = "2.6"
+gix = "0.66"
+bstr = "1.10"
+
+# Event bus
+crossbeam-channel = "0.5"
+
+# LRU cache
+lru = "0.12"
