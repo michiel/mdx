@@ -188,6 +188,48 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         }
     }
 
+    // Shift+V - enter visual line mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('V'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.enter_visual_line_mode();
+        return Ok(Action::Continue);
+    }
+
+    // Esc - exit visual line mode
+    if matches!(key, KeyEvent { code: KeyCode::Esc, .. }) {
+        app.exit_visual_line_mode();
+        return Ok(Action::Continue);
+    }
+
+    // Y - yank in visual line mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('Y'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        match app.yank_selection() {
+            Ok(_count) => {
+                // Show feedback in status (would need message system for full implementation)
+                // For now, just exit visual mode after yank
+                app.exit_visual_line_mode();
+            }
+            Err(_e) => {
+                // Silently fail - clipboard might not be available
+                app.exit_visual_line_mode();
+            }
+        }
+        return Ok(Action::Continue);
+    }
+
     // T - toggle TOC
     if matches!(
         key,

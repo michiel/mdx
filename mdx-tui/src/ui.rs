@@ -71,10 +71,17 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     // Get markdown content from document
     let content: String = app.doc.rope.chunks().collect();
 
-    // Convert to lines with cursor highlighting
+    // Convert to lines with cursor and selection highlighting
     let scroll = pane.view.scroll_line;
     let cursor = pane.view.cursor_line;
     let is_focused = app.panes.focused == pane_id;
+
+    // Get selection range if in visual line mode
+    let selection_range = if pane.view.mode == crate::app::Mode::VisualLine {
+        pane.view.selection.as_ref().map(|sel| sel.range())
+    } else {
+        None
+    };
 
     let lines: Vec<Line> = content
         .lines()
@@ -82,8 +89,24 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         .skip(scroll)
         .take(area.height as usize)
         .map(|(idx, text)| {
-            // Highlight cursor line (only if this pane is focused)
-            if is_focused && idx == cursor {
+            // Check if line is in selection
+            let is_selected = if let Some((start, end)) = selection_range {
+                idx >= start && idx <= end
+            } else {
+                false
+            };
+
+            // Highlight selected lines
+            if is_focused && is_selected {
+                Line::from(text.to_string()).style(
+                    Style::default()
+                        .fg(app.theme.base.fg.unwrap_or(Color::White))
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::REVERSED)
+                )
+            }
+            // Highlight cursor line (only if focused and not selected)
+            else if is_focused && idx == cursor && !is_selected {
                 Line::from(text.to_string()).style(
                     Style::default()
                         .fg(app.theme.base.fg.unwrap_or(Color::White))
@@ -177,15 +200,21 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let line_count = app.doc.line_count();
     let heading_count = app.doc.headings.len();
 
-    let (current_line, mode_str) = if let Some(pane) = app.panes.focused_pane() {
+    let (current_line, mode_str, selection_count) = if let Some(pane) = app.panes.focused_pane() {
         let line = pane.view.cursor_line + 1; // 1-based for display
-        let mode = match pane.view.mode {
-            crate::app::Mode::Normal => "NORMAL",
-            crate::app::Mode::VisualLine => "V-LINE",
+        let (mode, sel_count) = match pane.view.mode {
+            crate::app::Mode::Normal => ("NORMAL", None),
+            crate::app::Mode::VisualLine => {
+                let count = pane.view.selection.as_ref().map(|sel| {
+                    let (start, end) = sel.range();
+                    end - start + 1
+                });
+                ("V-LINE", count)
+            }
         };
-        (line, mode)
+        (line, mode, sel_count)
     } else {
-        (1, "NORMAL")
+        (1, "NORMAL", None)
     };
 
     let toc_indicator = if app.show_toc {
@@ -208,9 +237,15 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::KeyPrefix::CtrlW => "  ^W-",
     };
 
+    let selection_str = if let Some(count) = selection_count {
+        format!(" ({} lines)", count)
+    } else {
+        String::new()
+    };
+
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}]{}  [{}]{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, toc_indicator, theme_str, prefix_str
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(

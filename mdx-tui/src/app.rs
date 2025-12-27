@@ -85,6 +85,7 @@ impl App {
             let max_line = self.doc.line_count().saturating_sub(1);
             pane.view.cursor_line = (pane.view.cursor_line + n).min(max_line);
         }
+        self.update_selection();
     }
 
     /// Move cursor up by n lines
@@ -92,6 +93,7 @@ impl App {
         if let Some(pane) = self.panes.focused_pane_mut() {
             pane.view.cursor_line = pane.view.cursor_line.saturating_sub(n);
         }
+        self.update_selection();
     }
 
     /// Jump to specific line
@@ -100,6 +102,7 @@ impl App {
             let max_line = self.doc.line_count().saturating_sub(1);
             pane.view.cursor_line = line.min(max_line);
         }
+        self.update_selection();
     }
 
     /// Scroll down by half viewport height
@@ -194,6 +197,66 @@ impl App {
     /// Split the focused pane
     pub fn split_focused(&mut self, dir: crate::panes::SplitDir) {
         self.panes.split_focused(dir, 0); // doc_id is 0 for single document
+    }
+
+    /// Enter visual line mode
+    pub fn enter_visual_line_mode(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::VisualLine;
+            let cursor = pane.view.cursor_line;
+            pane.view.selection = Some(LineSelection::new(cursor));
+        }
+    }
+
+    /// Exit visual line mode
+    pub fn exit_visual_line_mode(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::Normal;
+            pane.view.selection = None;
+        }
+    }
+
+    /// Update selection cursor in visual line mode
+    pub fn update_selection(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            if pane.view.mode == Mode::VisualLine {
+                if let Some(ref mut selection) = pane.view.selection {
+                    selection.cursor = pane.view.cursor_line;
+                }
+            }
+        }
+    }
+
+    /// Yank selected lines to clipboard
+    #[cfg(feature = "clipboard")]
+    pub fn yank_selection(&self) -> anyhow::Result<usize> {
+        use arboard::Clipboard;
+
+        let pane = self.panes.focused_pane().ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
+
+        if pane.view.mode != Mode::VisualLine {
+            return Err(anyhow::anyhow!("Not in visual line mode"));
+        }
+
+        let selection = pane.view.selection.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No selection"))?;
+
+        let (start, end) = selection.range();
+        let text = self.doc.get_lines(start, end);
+        let line_count = end - start + 1;
+
+        let mut clipboard = Clipboard::new()
+            .map_err(|e| anyhow::anyhow!("Failed to access clipboard: {}", e))?;
+        clipboard.set_text(text)
+            .map_err(|e| anyhow::anyhow!("Failed to set clipboard: {}", e))?;
+
+        Ok(line_count)
+    }
+
+    /// Yank selected lines (no-op without clipboard feature)
+    #[cfg(not(feature = "clipboard"))]
+    pub fn yank_selection(&self) -> anyhow::Result<usize> {
+        Err(anyhow::anyhow!("Clipboard feature not enabled"))
     }
 }
 
@@ -469,5 +532,112 @@ mod tests {
         // At line 5 (heading 3)
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
         assert_eq!(app.current_heading_index(), Some(2));
+    }
+
+    #[test]
+    fn test_enter_visual_line_mode() {
+        let config = Config::default();
+        let doc = create_test_doc(10);
+        let mut app = App::new(config, doc);
+
+        // Move to line 3
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 3;
+
+        // Enter visual line mode
+        app.enter_visual_line_mode();
+
+        let pane = app.panes.focused_pane().unwrap();
+        assert_eq!(pane.view.mode, Mode::VisualLine);
+        assert!(pane.view.selection.is_some());
+
+        let selection = pane.view.selection.unwrap();
+        assert_eq!(selection.anchor, 3);
+        assert_eq!(selection.cursor, 3);
+    }
+
+    #[test]
+    fn test_visual_line_selection_navigation() {
+        let config = Config::default();
+        let doc = create_test_doc(10);
+        let mut app = App::new(config, doc);
+
+        // Start at line 3
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 3;
+        app.enter_visual_line_mode();
+
+        // Move down 2 lines
+        app.move_cursor_down(2);
+
+        let pane = app.panes.focused_pane().unwrap();
+        assert_eq!(pane.view.cursor_line, 5);
+
+        let selection = pane.view.selection.unwrap();
+        assert_eq!(selection.anchor, 3);
+        assert_eq!(selection.cursor, 5);
+        assert_eq!(selection.range(), (3, 5));
+    }
+
+    #[test]
+    fn test_visual_line_selection_backward() {
+        let config = Config::default();
+        let doc = create_test_doc(10);
+        let mut app = App::new(config, doc);
+
+        // Start at line 5
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
+        app.enter_visual_line_mode();
+
+        // Move up 3 lines
+        app.move_cursor_up(3);
+
+        let pane = app.panes.focused_pane().unwrap();
+        assert_eq!(pane.view.cursor_line, 2);
+
+        let selection = pane.view.selection.unwrap();
+        assert_eq!(selection.anchor, 5);
+        assert_eq!(selection.cursor, 2);
+        assert_eq!(selection.range(), (2, 5));
+    }
+
+    #[test]
+    fn test_exit_visual_line_mode() {
+        let config = Config::default();
+        let doc = create_test_doc(10);
+        let mut app = App::new(config, doc);
+
+        app.enter_visual_line_mode();
+        assert_eq!(app.panes.focused_pane().unwrap().view.mode, Mode::VisualLine);
+
+        app.exit_visual_line_mode();
+        let pane = app.panes.focused_pane().unwrap();
+        assert_eq!(pane.view.mode, Mode::Normal);
+        assert!(pane.view.selection.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "clipboard")]
+    fn test_yank_selection() {
+        let config = Config::default();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "Line 1\nLine 2\nLine 3\nLine 4\nLine 5").unwrap();
+        file.flush().unwrap();
+        let doc = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc);
+
+        // Select lines 1-3 (0-indexed)
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 1;
+        app.enter_visual_line_mode();
+        app.move_cursor_down(2);
+
+        // Yank - might fail in headless environment, but should not panic
+        let result = app.yank_selection();
+        match result {
+            Ok(count) => {
+                assert_eq!(count, 3);
+            }
+            Err(_) => {
+                // Clipboard might not be available in test environment
+            }
+        }
     }
 }

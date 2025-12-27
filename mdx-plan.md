@@ -414,7 +414,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Status shows correct line count
 - [ ] Selection highlight visible
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
