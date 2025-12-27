@@ -82,15 +82,15 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Add helper `rope_to_string()` for conversions when needed
 
 **Tests**:
-- [ ] Load simple markdown file with headings
-- [ ] Extract ATX headings (levels 1-6)
-- [ ] Extract Setext headings (H1 and H2 styles)
-- [ ] Verify line_count() matches actual lines
-- [ ] Test get_lines() extracts correct range
-- [ ] Test revision counter increments on reload
-- [ ] Handle empty file, file with no headings, very large file
+- [x] Load simple markdown file with headings
+- [x] Extract ATX headings (levels 1-6)
+- [x] Extract Setext headings (H1 and H2 styles)
+- [x] Verify line_count() matches actual lines
+- [x] Test get_lines() extracts correct range
+- [x] Test revision counter increments on reload
+- [x] Handle empty file, file with no headings, very large file
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

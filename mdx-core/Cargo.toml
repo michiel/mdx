@@ -37,3 +37,6 @@ notify = { workspace = true, optional = true }
 similar = { workspace = true, optional = true }
 gix = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3.14"

@@ -1,12 +1,15 @@
 //! Document model with Rope-based text storage
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ropey::Rope;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::toc;
+
 /// A heading in the markdown document
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heading {
     pub level: u8,
     pub text: String,
@@ -28,15 +31,44 @@ pub struct Document {
 
 impl Document {
     /// Load a document from a file path
-    pub fn load(_path: &std::path::Path) -> Result<Self> {
-        // TODO: Implementation in Stage 1
-        unimplemented!("Document::load will be implemented in Stage 1")
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+
+        let rope = Rope::from_str(&content);
+        let headings = toc::extract_headings(&rope);
+
+        let metadata = fs::metadata(path).ok();
+        let mtime = metadata.and_then(|m| m.modified().ok());
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            rope,
+            headings,
+            loaded_mtime: mtime,
+            disk_mtime: mtime,
+            dirty_on_disk: false,
+            rev: 1,
+        })
     }
 
     /// Reload the document from disk
     pub fn reload(&mut self) -> Result<()> {
-        // TODO: Implementation in Stage 1
-        unimplemented!("Document::reload will be implemented in Stage 1")
+        let content = fs::read_to_string(&self.path)
+            .with_context(|| format!("Failed to reload file: {}", self.path.display()))?;
+
+        self.rope = Rope::from_str(&content);
+        self.headings = toc::extract_headings(&self.rope);
+
+        let metadata = fs::metadata(&self.path).ok();
+        let mtime = metadata.and_then(|m| m.modified().ok());
+
+        self.loaded_mtime = mtime;
+        self.disk_mtime = mtime;
+        self.dirty_on_disk = false;
+        self.rev += 1;
+
+        Ok(())
     }
 
     /// Get the number of lines in the document
@@ -44,9 +76,125 @@ impl Document {
         self.rope.len_lines()
     }
 
-    /// Extract lines for yank operations
-    pub fn get_lines(&self, _start: usize, _end_inclusive: usize) -> String {
-        // TODO: Implementation in Stage 1
-        unimplemented!("Document::get_lines will be implemented in Stage 1")
+    /// Extract lines for yank operations (inclusive range)
+    pub fn get_lines(&self, start: usize, end_inclusive: usize) -> String {
+        let line_count = self.line_count();
+
+        // Clamp to valid range
+        let start = start.min(line_count.saturating_sub(1));
+        let end = end_inclusive.min(line_count.saturating_sub(1));
+
+        if start > end {
+            return String::new();
+        }
+
+        // Extract lines
+        let mut result = String::new();
+        for line_idx in start..=end {
+            if line_idx < line_count {
+                let line = self.rope.line(line_idx);
+                for chunk in line.chunks() {
+                    result.push_str(chunk);
+                }
+            }
+        }
+
+        // Remove trailing newline if present (yank should give clean text)
+        if result.ends_with('\n') {
+            result.pop();
+        }
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_load_empty_file() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.line_count(), 1); // Empty file has 1 line in Rope
+        assert_eq!(doc.headings.len(), 0);
+        assert_eq!(doc.rev, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_simple_file() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"# Heading\n\nSome text\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.line_count(), 4);
+        assert_eq!(doc.headings.len(), 1);
+        assert_eq!(doc.headings[0].level, 1);
+        assert_eq!(doc.headings[0].text, "Heading");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_reload_increments_revision() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"Initial content\n")?;
+        file.flush()?;
+
+        let mut doc = Document::load(file.path())?;
+        assert_eq!(doc.rev, 1);
+
+        // Modify file
+        file.write_all(b"New content\n")?;
+        file.flush()?;
+
+        doc.reload()?;
+        assert_eq!(doc.rev, 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_lines_single() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"Line 1\nLine 2\nLine 3\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.get_lines(0, 0), "Line 1");
+        assert_eq!(doc.get_lines(1, 1), "Line 2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_lines_range() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"Line 1\nLine 2\nLine 3\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.get_lines(0, 2), "Line 1\nLine 2\nLine 3");
+        assert_eq!(doc.get_lines(1, 2), "Line 2\nLine 3");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_lines_out_of_bounds() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"Line 1\nLine 2\n")?;
+
+        let doc = Document::load(file.path())?;
+        // Should clamp to valid range
+        let result = doc.get_lines(0, 100);
+        assert!(result.contains("Line 1"));
+        assert!(result.contains("Line 2"));
+
+        Ok(())
     }
 }
