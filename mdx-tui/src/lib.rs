@@ -10,13 +10,13 @@
 pub mod app;
 pub mod event;
 pub mod input;
+pub mod panes;
 pub mod render;
 pub mod terminal;
 pub mod theme;
 pub mod ui;
 
 // These will be added in later stages
-// pub mod panes;
 // pub mod toc;
 // pub mod editor;
 // #[cfg(feature = "watch")]

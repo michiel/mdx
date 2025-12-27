@@ -1,6 +1,7 @@
 //! Application state
 
 use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
+use crate::panes::PaneManager;
 use crate::theme::Theme;
 
 /// Application mode
@@ -8,6 +9,13 @@ use crate::theme::Theme;
 pub enum Mode {
     Normal,
     VisualLine,
+}
+
+/// Key prefix state for multi-key sequences
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyPrefix {
+    None,
+    CtrlW,
 }
 
 /// View state for a document viewport
@@ -35,12 +43,13 @@ impl ViewState {
 pub struct App {
     pub config: Config,
     pub doc: Document,
-    pub view: ViewState,
+    pub panes: PaneManager,
     pub theme: Theme,
     pub theme_variant: ThemeVariant,
     pub show_toc: bool,
     pub toc_focus: bool,
     pub toc_selected: usize,
+    pub key_prefix: KeyPrefix,
     pub should_quit: bool,
 }
 
@@ -50,15 +59,17 @@ impl App {
         let show_toc = config.toc.enabled;
         let theme_variant = config.theme;
         let theme = Theme::for_variant(theme_variant);
+        let panes = PaneManager::new(0); // Single pane for single document
         Self {
             config,
             doc,
-            view: ViewState::new(),
+            panes,
             theme,
             theme_variant,
             show_toc,
             toc_focus: false,
             toc_selected: 0,
+            key_prefix: KeyPrefix::None,
             should_quit: false,
         }
     }
@@ -70,19 +81,25 @@ impl App {
 
     /// Move cursor down by n lines
     pub fn move_cursor_down(&mut self, n: usize) {
-        let max_line = self.doc.line_count().saturating_sub(1);
-        self.view.cursor_line = (self.view.cursor_line + n).min(max_line);
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            let max_line = self.doc.line_count().saturating_sub(1);
+            pane.view.cursor_line = (pane.view.cursor_line + n).min(max_line);
+        }
     }
 
     /// Move cursor up by n lines
     pub fn move_cursor_up(&mut self, n: usize) {
-        self.view.cursor_line = self.view.cursor_line.saturating_sub(n);
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.cursor_line = pane.view.cursor_line.saturating_sub(n);
+        }
     }
 
     /// Jump to specific line
     pub fn jump_to_line(&mut self, line: usize) {
-        let max_line = self.doc.line_count().saturating_sub(1);
-        self.view.cursor_line = line.min(max_line);
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            let max_line = self.doc.line_count().saturating_sub(1);
+            pane.view.cursor_line = line.min(max_line);
+        }
     }
 
     /// Scroll down by half viewport height
@@ -99,16 +116,18 @@ impl App {
 
     /// Auto-scroll viewport to keep cursor visible
     pub fn auto_scroll(&mut self, viewport_height: usize) {
-        let cursor = self.view.cursor_line;
-        let scroll = self.view.scroll_line;
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            let cursor = pane.view.cursor_line;
+            let scroll = pane.view.scroll_line;
 
-        // Cursor above viewport - scroll up
-        if cursor < scroll {
-            self.view.scroll_line = cursor;
-        }
-        // Cursor below viewport - scroll down
-        else if cursor >= scroll + viewport_height {
-            self.view.scroll_line = cursor.saturating_sub(viewport_height - 1);
+            // Cursor above viewport - scroll up
+            if cursor < scroll {
+                pane.view.scroll_line = cursor;
+            }
+            // Cursor below viewport - scroll down
+            else if cursor >= scroll + viewport_height {
+                pane.view.scroll_line = cursor.saturating_sub(viewport_height - 1);
+            }
         }
     }
 
@@ -160,14 +179,21 @@ impl App {
             return None;
         }
 
+        let cursor_line = self.panes.focused_pane()?.view.cursor_line;
+
         // Find the last heading that's at or before the cursor
         for (i, heading) in self.doc.headings.iter().enumerate().rev() {
-            if heading.line <= self.view.cursor_line {
+            if heading.line <= cursor_line {
                 return Some(i);
             }
         }
 
         None
+    }
+
+    /// Split the focused pane
+    pub fn split_focused(&mut self, dir: crate::panes::SplitDir) {
+        self.panes.split_focused(dir, 0); // doc_id is 0 for single document
     }
 }
 
@@ -196,11 +222,11 @@ mod tests {
         let doc = create_test_doc(10);
         let mut app = App::new(config, doc);
 
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
         app.move_cursor_down(1);
-        assert_eq!(app.view.cursor_line, 1);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 1);
         app.move_cursor_down(3);
-        assert_eq!(app.view.cursor_line, 4);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 4);
     }
 
     #[test]
@@ -211,7 +237,7 @@ mod tests {
 
         // Try to move beyond last line
         app.move_cursor_down(100);
-        assert_eq!(app.view.cursor_line, 9); // 0-indexed, so line 9 is the last
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 9); // 0-indexed, so line 9 is the last
     }
 
     #[test]
@@ -220,11 +246,11 @@ mod tests {
         let doc = create_test_doc(10);
         let mut app = App::new(config, doc);
 
-        app.view.cursor_line = 5;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
         app.move_cursor_up(1);
-        assert_eq!(app.view.cursor_line, 4);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 4);
         app.move_cursor_up(3);
-        assert_eq!(app.view.cursor_line, 1);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 1);
     }
 
     #[test]
@@ -233,10 +259,10 @@ mod tests {
         let doc = create_test_doc(10);
         let mut app = App::new(config, doc);
 
-        app.view.cursor_line = 2;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 2;
         // Try to move before first line
         app.move_cursor_up(100);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
     }
 
     #[test]
@@ -246,17 +272,17 @@ mod tests {
         let mut app = App::new(config, doc);
 
         app.jump_to_line(5);
-        assert_eq!(app.view.cursor_line, 5);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 5);
 
         app.jump_to_line(0);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
 
         app.jump_to_line(9);
-        assert_eq!(app.view.cursor_line, 9);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 9);
 
         // Beyond bounds
         app.jump_to_line(100);
-        assert_eq!(app.view.cursor_line, 9);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 9);
     }
 
     #[test]
@@ -269,11 +295,11 @@ mod tests {
 
         // Half page down (10 lines)
         app.scroll_half_page_down(viewport_height);
-        assert_eq!(app.view.cursor_line, 10);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 10);
 
         // Half page up
         app.scroll_half_page_up(viewport_height);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
     }
 
     #[test]
@@ -284,11 +310,11 @@ mod tests {
         let viewport_height = 10;
 
         // Move cursor to line 15 (beyond viewport of 10 lines)
-        app.view.cursor_line = 15;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 15;
         app.auto_scroll(viewport_height);
 
         // Scroll should adjust so cursor is at bottom of viewport
-        assert_eq!(app.view.scroll_line, 6); // 15 - 9 = 6
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 6); // 15 - 9 = 6
     }
 
     #[test]
@@ -299,13 +325,13 @@ mod tests {
         let viewport_height = 10;
 
         // Start scrolled down
-        app.view.scroll_line = 20;
-        app.view.cursor_line = 15; // Above current scroll
+        app.panes.focused_pane_mut().unwrap().view.scroll_line = 20;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 15; // Above current scroll
 
         app.auto_scroll(viewport_height);
 
         // Scroll should move up to show cursor
-        assert_eq!(app.view.scroll_line, 15);
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 15);
     }
 
     #[test]
@@ -316,10 +342,10 @@ mod tests {
 
         // Should handle empty doc gracefully
         app.move_cursor_down(1);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
 
         app.move_cursor_up(1);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
     }
 
     #[test]
@@ -329,10 +355,10 @@ mod tests {
         let mut app = App::new(config, doc);
 
         app.move_cursor_down(1);
-        assert_eq!(app.view.cursor_line, 0); // Can't move beyond line 0
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0); // Can't move beyond line 0
 
         app.move_cursor_up(1);
-        assert_eq!(app.view.cursor_line, 0);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
     }
 
     #[test]
@@ -412,7 +438,7 @@ mod tests {
         app.toc_jump_to_selected(10);
 
         // Heading 2 should be at line 2 (0-indexed)
-        assert_eq!(app.view.cursor_line, 2);
+        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 2);
     }
 
     #[test]
@@ -429,19 +455,19 @@ mod tests {
         let mut app = App::new(config, doc);
 
         // At line 0 - should be heading 0
-        app.view.cursor_line = 0;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 0;
         assert_eq!(app.current_heading_index(), Some(0));
 
         // At line 2 (still under heading 1)
-        app.view.cursor_line = 2;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 2;
         assert_eq!(app.current_heading_index(), Some(0));
 
         // At line 3 (heading 2)
-        app.view.cursor_line = 3;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 3;
         assert_eq!(app.current_heading_index(), Some(1));
 
         // At line 5 (heading 3)
-        app.view.cursor_line = 5;
+        app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
         assert_eq!(app.current_heading_index(), Some(2));
     }
 }

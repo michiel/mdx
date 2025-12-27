@@ -365,7 +365,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Works with 1, 2, 3, 4+ panes
 - [ ] Prefix timeout/cancel works
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

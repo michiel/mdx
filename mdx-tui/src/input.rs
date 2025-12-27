@@ -1,6 +1,7 @@
 //! Input handling and keybindings
 
-use crate::app::App;
+use crate::app::{App, KeyPrefix};
+use crate::panes::{Direction, SplitDir};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -37,6 +38,99 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
     ) {
         app.quit();
         return Ok(Action::Quit);
+    }
+
+    // Handle key prefix sequences
+    if app.key_prefix == KeyPrefix::CtrlW {
+        match key {
+            // ^w s - horizontal split
+            KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.split_focused(SplitDir::Horizontal);
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w v - vertical split
+            KeyEvent {
+                code: KeyCode::Char('v'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.split_focused(SplitDir::Vertical);
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // Any other key cancels the prefix
+            _ => {
+                app.key_prefix = KeyPrefix::None;
+            }
+        }
+    }
+
+    // ^w - enter prefix mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('w'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        app.key_prefix = KeyPrefix::CtrlW;
+        return Ok(Action::Continue);
+    }
+
+    // Ctrl+Arrow keys - move focus between panes
+    let pane_layouts = app.panes.compute_layout(ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+    });
+
+    match key {
+        KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => {
+            app.panes.move_focus(Direction::Up, &pane_layouts);
+            return Ok(Action::Continue);
+        }
+
+        KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => {
+            app.panes.move_focus(Direction::Down, &pane_layouts);
+            return Ok(Action::Continue);
+        }
+
+        KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => {
+            app.panes.move_focus(Direction::Left, &pane_layouts);
+            return Ok(Action::Continue);
+        }
+
+        KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => {
+            app.panes.move_focus(Direction::Right, &pane_layouts);
+            return Ok(Action::Continue);
+        }
+
+        _ => {}
     }
 
     // Handle TOC-specific keys when TOC is focused
