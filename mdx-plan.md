@@ -121,14 +121,14 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Add serde derives for all config types
 
 **Tests**:
-- [ ] Selection range() returns correct min/max regardless of direction
-- [ ] Config parses valid YAML with all fields
-- [ ] Config uses defaults when file missing
-- [ ] Config merges partial YAML with defaults
-- [ ] Platform-specific config paths resolve correctly
-- [ ] Invalid YAML shows helpful error
+- [x] Selection range() returns correct min/max regardless of direction
+- [x] Config parses valid YAML with all fields
+- [x] Config uses defaults when file missing
+- [x] Config merges partial YAML with defaults
+- [x] Platform-specific config paths resolve correctly
+- [x] Invalid YAML shows helpful error
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

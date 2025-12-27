@@ -1,6 +1,8 @@
 //! Configuration management for mdx
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -109,5 +111,152 @@ impl Default for GitConfig {
             diff: true,
             base: GitBase::Head,
         }
+    }
+}
+
+impl Config {
+    /// Get the platform-specific config file path
+    pub fn config_path() -> Option<PathBuf> {
+        directories::ProjectDirs::from("", "", "mdx")
+            .map(|proj_dirs| proj_dirs.config_dir().join("mdx.yaml"))
+    }
+
+    /// Load configuration from file, falling back to defaults if missing
+    pub fn load() -> Result<Self> {
+        let config_path = Self::config_path();
+
+        if let Some(path) = config_path {
+            if path.exists() {
+                let content = std::fs::read_to_string(&path)
+                    .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+                let config: Config = serde_yaml::from_str(&content)
+                    .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+
+                return Ok(config);
+            }
+        }
+
+        // No config file, use defaults
+        Ok(Self::default())
+    }
+
+    /// Load from a specific path (for testing)
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.theme, ThemeVariant::Dark);
+        assert!(config.toc.enabled);
+        assert_eq!(config.toc.side, TocSide::Left);
+        assert_eq!(config.toc.width, 32);
+        assert_eq!(config.editor.command, "$EDITOR");
+    }
+
+    #[test]
+    fn test_load_missing_config() -> Result<()> {
+        // Loading should return defaults when file doesn't exist
+        let config = Config::load()?;
+        assert_eq!(config.theme, ThemeVariant::Dark);
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_valid_yaml() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        let yaml_content = if cfg!(feature = "watch") && cfg!(feature = "git") {
+            "theme: Light\n\
+toc:\n  enabled: false\n  side: Right\n  width: 40\n\
+editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n\
+watch:\n  enabled: true\n  auto_reload: false\n\
+git:\n  diff: true\n  base: Head\n"
+        } else {
+            "theme: Light\n\
+toc:\n  enabled: false\n  side: Right\n  width: 40\n\
+editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
+        };
+        file.write_all(yaml_content.as_bytes())?;
+
+        let config = Config::load_from(file.path())?;
+        assert_eq!(config.theme, ThemeVariant::Light);
+        assert!(!config.toc.enabled);
+        assert_eq!(config.toc.side, TocSide::Right);
+        assert_eq!(config.toc.width, 40);
+        assert_eq!(config.editor.command, "nvim");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_partial_yaml() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        let yaml_content = if cfg!(feature = "watch") && cfg!(feature = "git") {
+            "theme: Light\n\
+toc:\n  enabled: true\n  side: Left\n  width: 32\n\
+editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n\
+watch:\n  enabled: true\n  auto_reload: false\n\
+git:\n  diff: true\n  base: Head\n"
+        } else {
+            "theme: Light\n\
+toc:\n  enabled: true\n  side: Left\n  width: 32\n\
+editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
+        };
+        file.write_all(yaml_content.as_bytes())?;
+
+        let config = Config::load_from(file.path())?;
+        assert_eq!(config.theme, ThemeVariant::Light);
+        assert!(config.toc.enabled);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_invalid_yaml_returns_error() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"invalid: yaml: syntax:").unwrap();
+
+        let result = Config::load_from(file.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_path_returns_some() {
+        let path = Config::config_path();
+        // Should return Some on all platforms
+        assert!(path.is_some());
+        if let Some(p) = path {
+            assert!(p.to_string_lossy().contains("mdx"));
+            assert!(p.to_string_lossy().ends_with("mdx.yaml"));
+        }
+    }
+
+    #[test]
+    fn test_theme_variant_serialization() -> Result<()> {
+        let config = Config {
+            theme: ThemeVariant::Light,
+            ..Default::default()
+        };
+
+        let yaml = serde_yaml::to_string(&config)?;
+        assert!(yaml.contains("Light"));
+
+        let parsed: Config = serde_yaml::from_str(&yaml)?;
+        assert_eq!(parsed.theme, ThemeVariant::Light);
+
+        Ok(())
     }
 }
