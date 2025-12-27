@@ -30,8 +30,28 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Get markdown content from document
     let content: String = app.doc.rope.chunks().collect();
 
-    // For now, render as simple paragraph (will use tui-markdown in enhancement)
-    let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
+    // Convert to lines with cursor highlighting
+    let scroll = app.view.scroll_line;
+    let cursor = app.view.cursor_line;
+
+    let lines: Vec<Line> = content
+        .lines()
+        .enumerate()
+        .skip(scroll)
+        .take(area.height as usize)
+        .map(|(idx, text)| {
+            // Highlight cursor line
+            if idx == cursor {
+                Line::from(text.to_string()).style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::LightYellow)
+                )
+            } else {
+                Line::from(text.to_string())
+            }
+        })
+        .collect();
 
     let paragraph = Paragraph::new(lines)
         .block(Block::default().borders(Borders::NONE))
@@ -50,10 +70,15 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
     let line_count = app.doc.line_count();
     let heading_count = app.doc.headings.len();
+    let current_line = app.view.cursor_line + 1; // 1-based for display
+    let mode_str = match app.view.mode {
+        crate::app::Mode::Normal => "NORMAL",
+        crate::app::Mode::VisualLine => "V-LINE",
+    };
 
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  [press 'q' to quit]",
-        filename, line_count, heading_count
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}]",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(

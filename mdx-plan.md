@@ -219,7 +219,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Navigation works with single-line file
 - [ ] Navigation works with empty file
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
