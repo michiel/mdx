@@ -134,6 +134,53 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         _ => {}
     }
 
+    // Handle search mode input
+    if let Some(pane) = app.panes.focused_pane() {
+        if pane.view.mode == crate::app::Mode::Search {
+            match key {
+                // Enter - execute search and exit search mode
+                KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                } => {
+                    app.exit_search_mode();
+                    return Ok(Action::Continue);
+                }
+
+                // Esc - cancel search and exit search mode
+                KeyEvent {
+                    code: KeyCode::Esc,
+                    ..
+                } => {
+                    app.clear_search();
+                    app.exit_search_mode();
+                    return Ok(Action::Continue);
+                }
+
+                // Backspace - remove last character
+                KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                } => {
+                    app.search_backspace();
+                    return Ok(Action::Continue);
+                }
+
+                // Any printable character - add to search query
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                    ..
+                } => {
+                    app.search_add_char(c);
+                    return Ok(Action::Continue);
+                }
+
+                _ => return Ok(Action::Continue),
+            }
+        }
+    }
+
     // Handle TOC-specific keys when TOC is focused
     if app.toc_focus {
         match key {
@@ -247,6 +294,45 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 app.exit_visual_line_mode();
             }
         }
+        return Ok(Action::Continue);
+    }
+
+    // / - enter search mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('/'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.enter_search_mode();
+        return Ok(Action::Continue);
+    }
+
+    // n - next search match
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('n'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.next_search_match(viewport_height);
+        return Ok(Action::Continue);
+    }
+
+    // N - previous search match
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('N'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.prev_search_match(viewport_height);
         return Ok(Action::Continue);
     }
 

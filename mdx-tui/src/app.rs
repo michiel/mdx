@@ -342,6 +342,110 @@ impl App {
 
         Ok(())
     }
+
+    /// Search for text in the document
+    pub fn search(&mut self, query: &str) {
+        if query.is_empty() {
+            self.search_query.clear();
+            self.search_matches.clear();
+            self.search_current_match = None;
+            return;
+        }
+
+        self.search_query = query.to_lowercase();
+        self.search_matches.clear();
+        self.search_current_match = None;
+
+        // Find all matching lines
+        let line_count = self.doc.line_count();
+        for line_idx in 0..line_count {
+            let line_text: String = self.doc.rope.line(line_idx).chunks().collect();
+            if line_text.to_lowercase().contains(&self.search_query) {
+                self.search_matches.push(line_idx);
+            }
+        }
+
+        // Jump to first match if any
+        if !self.search_matches.is_empty() {
+            self.search_current_match = Some(0);
+            let first_match = self.search_matches[0];
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.cursor_line = first_match;
+            }
+        }
+    }
+
+    /// Jump to next search match
+    pub fn next_search_match(&mut self, viewport_height: usize) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        if let Some(current_idx) = self.search_current_match {
+            let next_idx = (current_idx + 1) % self.search_matches.len();
+            self.search_current_match = Some(next_idx);
+            let match_line = self.search_matches[next_idx];
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.cursor_line = match_line;
+            }
+            self.auto_scroll(viewport_height);
+        }
+    }
+
+    /// Jump to previous search match
+    pub fn prev_search_match(&mut self, viewport_height: usize) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        if let Some(current_idx) = self.search_current_match {
+            let prev_idx = if current_idx == 0 {
+                self.search_matches.len() - 1
+            } else {
+                current_idx - 1
+            };
+            self.search_current_match = Some(prev_idx);
+            let match_line = self.search_matches[prev_idx];
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.cursor_line = match_line;
+            }
+            self.auto_scroll(viewport_height);
+        }
+    }
+
+    /// Clear search
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_current_match = None;
+    }
+
+    /// Enter search mode
+    pub fn enter_search_mode(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::Search;
+        }
+        self.search_query.clear();
+    }
+
+    /// Exit search mode
+    pub fn exit_search_mode(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::Normal;
+        }
+    }
+
+    /// Add character to search query
+    pub fn search_add_char(&mut self, c: char) {
+        self.search_query.push(c);
+        self.search(&self.search_query.clone());
+    }
+
+    /// Remove last character from search query
+    pub fn search_backspace(&mut self) {
+        self.search_query.pop();
+        self.search(&self.search_query.clone());
+    }
 }
 
 #[cfg(test)]

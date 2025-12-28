@@ -477,9 +477,24 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     #[cfg(not(feature = "watch"))]
     let watch_str = "";
 
+    let search_str = if !app.search_query.is_empty() {
+        if let Some(current_idx) = app.search_current_match {
+            format!(
+                "  /{} ({}/{})",
+                app.search_query,
+                current_idx + 1,
+                app.search_matches.len()
+            )
+        } else {
+            format!("  /{} (no matches)", app.search_query)
+        }
+    } else {
+        String::new()
+    };
+
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}{}",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str, search_str
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(
