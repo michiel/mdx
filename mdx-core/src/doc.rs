@@ -8,6 +8,9 @@ use std::time::SystemTime;
 
 use crate::toc;
 
+#[cfg(feature = "git")]
+use crate::diff::DiffGutter;
+
 /// A heading in the markdown document
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heading {
@@ -27,6 +30,8 @@ pub struct Document {
     pub disk_mtime: Option<SystemTime>,
     pub dirty_on_disk: bool,
     pub rev: u64,
+    #[cfg(feature = "git")]
+    pub diff_gutter: DiffGutter,
 }
 
 impl Document {
@@ -41,6 +46,9 @@ impl Document {
         let metadata = fs::metadata(path).ok();
         let mtime = metadata.and_then(|m| m.modified().ok());
 
+        #[cfg(feature = "git")]
+        let diff_gutter = Self::compute_diff_gutter(path, &content);
+
         Ok(Self {
             path: path.to_path_buf(),
             rope,
@@ -49,6 +57,8 @@ impl Document {
             disk_mtime: mtime,
             dirty_on_disk: false,
             rev: 1,
+            #[cfg(feature = "git")]
+            diff_gutter,
         })
     }
 
@@ -68,7 +78,29 @@ impl Document {
         self.dirty_on_disk = false;
         self.rev += 1;
 
+        #[cfg(feature = "git")]
+        {
+            self.diff_gutter = Self::compute_diff_gutter(&self.path, &content);
+        }
+
         Ok(())
+    }
+
+    /// Compute diff gutter from git HEAD
+    #[cfg(feature = "git")]
+    fn compute_diff_gutter(path: &Path, current_content: &str) -> DiffGutter {
+        use crate::diff::diff_gutter_from_text;
+        use crate::git::get_base_text_subprocess;
+
+        // Try to get base text from git
+        match get_base_text_subprocess(path) {
+            Ok(Some(base_text)) => diff_gutter_from_text(&base_text, current_content),
+            Ok(None) | Err(_) => {
+                // Not in a git repo or error getting base text
+                let line_count = current_content.lines().count().max(1);
+                DiffGutter::empty(line_count)
+            }
+        }
     }
 
     /// Get the number of lines in the document

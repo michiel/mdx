@@ -89,6 +89,24 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         .skip(scroll)
         .take(area.height as usize)
         .map(|(idx, text)| {
+            // Get diff mark for this line
+            #[cfg(feature = "git")]
+            let gutter = if app.config.git.diff {
+                use mdx_core::diff::DiffMark;
+                match app.doc.diff_gutter.get(idx) {
+                    DiffMark::None => "  ",
+                    DiffMark::Added => "+ ",
+                    DiffMark::Modified => "~ ",
+                    DiffMark::DeletedAfter(_) => "▾ ",
+                }
+            } else {
+                "  "
+            };
+            #[cfg(not(feature = "git"))]
+            let gutter = "  ";
+
+            let line_text = format!("{}{}", gutter, text);
+
             // Check if line is in selection
             let is_selected = if let Some((start, end)) = selection_range {
                 idx >= start && idx <= end
@@ -98,7 +116,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
             // Highlight selected lines
             if is_focused && is_selected {
-                Line::from(text.to_string()).style(
+                Line::from(line_text).style(
                     Style::default()
                         .fg(app.theme.base.fg.unwrap_or(Color::White))
                         .bg(Color::DarkGray)
@@ -107,13 +125,13 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             }
             // Highlight cursor line (only if focused and not selected)
             else if is_focused && idx == cursor && !is_selected {
-                Line::from(text.to_string()).style(
+                Line::from(line_text).style(
                     Style::default()
                         .fg(app.theme.base.fg.unwrap_or(Color::White))
                         .bg(app.theme.cursor_line_bg)
                 )
             } else {
-                Line::from(text.to_string()).style(app.theme.base)
+                Line::from(line_text).style(app.theme.base)
             }
         })
         .collect();

@@ -615,7 +615,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Gutter only on first wrapped line
 - [ ] Works with config.git.diff = false
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
