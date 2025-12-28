@@ -10,6 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum Action {
     Continue,
     Quit,
+    OpenEditor,
 }
 
 /// Handle a key event with viewport height for scroll commands
@@ -254,6 +255,18 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
     ) {
         app.toggle_theme();
         return Ok(Action::Continue);
+    }
+
+    // e - open in editor
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('e'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        return Ok(Action::OpenEditor);
     }
 
     // Navigation commands (when not in TOC)

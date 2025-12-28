@@ -8,6 +8,7 @@
 //! - Theme system
 
 pub mod app;
+pub mod editor;
 pub mod event;
 pub mod input;
 pub mod panes;
@@ -18,7 +19,6 @@ pub mod ui;
 
 // These will be added in later stages
 // pub mod toc;
-// pub mod editor;
 // #[cfg(feature = "watch")]
 // pub mod watcher;
 // #[cfg(feature = "git")]
@@ -65,7 +65,34 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
             if let Event::Key(key) = crossterm::event::read().context("Failed to read event")? {
                 // Only handle key press events, ignore release
                 if key.kind == KeyEventKind::Press {
-                    input::handle_input(app, key, viewport_height)?;
+                    let action = input::handle_input(app, key, viewport_height)?;
+
+                    // Handle special actions
+                    match action {
+                        input::Action::OpenEditor => {
+                            // Suspend terminal
+                            terminal::restore().context("Failed to restore terminal for editor")?;
+
+                            // Launch editor
+                            let editor_result = app.open_in_editor();
+
+                            // Restore terminal
+                            *terminal = terminal::init().context("Failed to reinitialize terminal after editor")?;
+
+                            // Handle editor errors (after terminal is restored)
+                            if let Err(e) = editor_result {
+                                // TODO: Show error in status bar
+                                // For now, just continue silently
+                                eprintln!("Editor error: {}", e);
+                            }
+                        }
+                        input::Action::Quit => {
+                            // Quit already handled by should_quit flag
+                        }
+                        input::Action::Continue => {
+                            // Nothing to do
+                        }
+                    }
                 }
             }
         }

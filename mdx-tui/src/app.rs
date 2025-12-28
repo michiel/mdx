@@ -258,6 +258,25 @@ impl App {
     pub fn yank_selection(&self) -> anyhow::Result<usize> {
         Err(anyhow::anyhow!("Clipboard feature not enabled"))
     }
+
+    /// Open the current file in an external editor
+    pub fn open_in_editor(&self) -> anyhow::Result<()> {
+        use crate::editor;
+
+        let pane = self.panes.focused_pane()
+            .ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
+
+        // Get current line (1-indexed for editors)
+        let line = pane.view.cursor_line + 1;
+
+        // Resolve editor command
+        let command = editor::resolve_editor_command(&self.config.editor.command);
+
+        // Launch editor (terminal suspend/restore handled by caller)
+        editor::launch_editor(&command, &self.config.editor.args, &self.doc.path, line)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

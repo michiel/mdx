@@ -458,7 +458,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] {file} and {line} substituted properly
 - [ ] Handles editor not found gracefully
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
