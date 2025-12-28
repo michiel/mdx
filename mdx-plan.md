@@ -677,7 +677,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Performance better than subprocess (benchmark)
 - [ ] Works in nested subdirectories
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

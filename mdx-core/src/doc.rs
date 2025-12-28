@@ -90,10 +90,10 @@ impl Document {
     #[cfg(feature = "git")]
     fn compute_diff_gutter(path: &Path, current_content: &str) -> DiffGutter {
         use crate::diff::diff_gutter_from_text;
-        use crate::git::get_base_text_subprocess;
+        use crate::git::get_base_text_gix;
 
-        // Try to get base text from git
-        match get_base_text_subprocess(path) {
+        // Try to get base text from git using gix
+        match get_base_text_gix(path) {
             Ok(Some(base_text)) => diff_gutter_from_text(&base_text, current_content),
             Ok(None) | Err(_) => {
                 // Not in a git repo or error getting base text
