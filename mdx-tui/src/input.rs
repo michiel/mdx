@@ -387,12 +387,12 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             app.auto_scroll(viewport_height);
         }
 
-        // PageDown/PageUp - same as Ctrl+d/u
+        // PageDown/PageUp - scroll by full page
         KeyEvent {
             code: KeyCode::PageDown,
             ..
         } => {
-            app.scroll_half_page_down(viewport_height);
+            app.move_cursor_down(viewport_height.saturating_sub(2));
             app.auto_scroll(viewport_height);
         }
 
@@ -400,7 +400,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             code: KeyCode::PageUp,
             ..
         } => {
-            app.scroll_half_page_up(viewport_height);
+            app.move_cursor_up(viewport_height.saturating_sub(2));
             app.auto_scroll(viewport_height);
         }
 
@@ -410,7 +410,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::NONE,
             ..
         } => {
-            app.scroll_half_page_down(viewport_height);
+            app.move_cursor_down(viewport_height.saturating_sub(2));
             app.auto_scroll(viewport_height);
         }
 
