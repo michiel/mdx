@@ -85,6 +85,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     // Build lines preserving source structure
     let mut styled_lines: Vec<Line> = Vec::new();
+    let mut in_code_block = false;
+    let mut code_block_lang = String::new();
 
     for line_idx in 0..line_count {
         let mut line_spans: Vec<Span> = Vec::new();
@@ -127,8 +129,26 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         // Remove trailing newline for styling
         let line_text = line_text.trim_end_matches('\n');
 
-        // Apply markdown styling to the line
-        line_spans.extend(style_markdown_line(line_text, &app.theme));
+        // Check for code block markers
+        if line_text.starts_with("```") {
+            if in_code_block {
+                // End of code block
+                in_code_block = false;
+                code_block_lang.clear();
+                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+            } else {
+                // Start of code block
+                in_code_block = true;
+                code_block_lang = line_text.trim_start_matches('`').to_string();
+                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+            }
+        } else if in_code_block {
+            // Inside code block - render as code
+            line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+        } else {
+            // Apply markdown styling to the line
+            line_spans.extend(style_markdown_line(line_text, &app.theme));
+        }
 
         // Check if this line is selected or cursor
         let is_selected = if let Some((start, end)) = selection_range {
@@ -172,9 +192,87 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
 /// Style a single line of markdown text
 fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'static>> {
-    use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+    let mut spans = Vec::new();
 
-    // Quick check for heading
+    // Check for horizontal rule
+    let trimmed = line.trim();
+    if (trimmed.chars().all(|c| c == '-') && trimmed.len() >= 3)
+        || (trimmed.chars().all(|c| c == '*') && trimmed.len() >= 3)
+        || (trimmed.chars().all(|c| c == '_') && trimmed.len() >= 3)
+    {
+        spans.push(Span::styled(
+            line.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        return spans;
+    }
+
+    // Check for table row (contains |)
+    if line.contains('|') && (line.trim_start().starts_with('|') || line.contains(" | ")) {
+        // Simple table rendering - split by | and style each cell
+        let parts: Vec<&str> = line.split('|').collect();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(
+                    "|".to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            // Check if this is a separator row (contains only -, :, and spaces)
+            let is_separator = part.trim().chars().all(|c| c == '-' || c == ':' || c == ' ');
+            if is_separator && !part.trim().is_empty() {
+                spans.push(Span::styled(
+                    part.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                // Style content within cell
+                spans.extend(style_inline_markdown(part, theme.base, theme.code));
+            }
+        }
+        return spans;
+    }
+
+    // Check for list item (unordered: -, *, +)
+    let list_pattern = if let Some(rest) = line.trim_start().strip_prefix("- ") {
+        Some(("- ", rest, line.len() - line.trim_start().len()))
+    } else if let Some(rest) = line.trim_start().strip_prefix("* ") {
+        Some(("* ", rest, line.len() - line.trim_start().len()))
+    } else if let Some(rest) = line.trim_start().strip_prefix("+ ") {
+        Some(("+ ", rest, line.len() - line.trim_start().len()))
+    } else {
+        // Check for ordered list (number followed by . or ))
+        let trimmed_start = line.trim_start();
+        if let Some(pos) = trimmed_start.find(|c| c == '.' || c == ')') {
+            let prefix = &trimmed_start[..pos];
+            if prefix.chars().all(|c| c.is_ascii_digit()) && trimmed_start.len() > pos + 1 {
+                let rest = &trimmed_start[pos + 2..]; // Skip ". " or ") "
+                let marker = &trimmed_start[..pos + 2];
+                Some((marker, rest, line.len() - line.trim_start().len()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some((marker, content, indent)) = list_pattern {
+        // Add indentation
+        if indent > 0 {
+            spans.push(Span::raw(" ".repeat(indent)));
+        }
+        // Add list marker with special color
+        spans.push(Span::styled(
+            marker.to_string(),
+            Style::default().fg(Color::Yellow),
+        ));
+        // Style the rest as inline markdown
+        spans.extend(style_inline_markdown(content, theme.base, theme.code));
+        return spans;
+    }
+
+    // Check for heading
     let (is_heading, heading_level, content) = if let Some(stripped) = line.strip_prefix("# ") {
         (true, 1, stripped)
     } else if let Some(stripped) = line.strip_prefix("## ") {
@@ -192,7 +290,6 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
     };
 
     // If it's a heading, show the ## prefix with heading style
-    let mut spans = Vec::new();
     if is_heading {
         let prefix = &line[..(line.len() - content.len())];
         spans.push(Span::styled(
@@ -201,17 +298,31 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
         ));
     }
 
-    // Parse inline markdown (bold, italic, code) using pulldown_cmark
-    let parser = Parser::new(content);
+    // For headings or regular text, parse inline markdown
     let base_style = if is_heading && heading_level > 0 && heading_level <= 6 {
         theme.heading[heading_level - 1]
     } else {
         theme.base
     };
 
+    spans.extend(style_inline_markdown(content, base_style, theme.code));
+
+    // If we didn't get any spans, just return the raw text
+    if spans.is_empty() {
+        spans.push(Span::styled(line.to_string(), theme.base));
+    }
+
+    spans
+}
+
+/// Style inline markdown (bold, italic, code) within text
+fn style_inline_markdown(text: &str, base_style: Style, code_style: Style) -> Vec<Span<'static>> {
+    use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+
+    let mut spans = Vec::new();
+    let parser = Parser::new(text);
     let mut in_bold = false;
     let mut in_italic = false;
-    let mut has_content = false;
 
     for event in parser {
         match event {
@@ -227,8 +338,7 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
             Event::End(TagEnd::Emphasis) => {
                 in_italic = false;
             }
-            Event::Text(text) => {
-                has_content = true;
+            Event::Text(content) => {
                 let mut style = base_style;
                 if in_bold {
                     style = style.add_modifier(Modifier::BOLD);
@@ -236,20 +346,13 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
                 if in_italic {
                     style = style.add_modifier(Modifier::ITALIC);
                 }
-                spans.push(Span::styled(text.to_string(), style));
+                spans.push(Span::styled(content.to_string(), style));
             }
             Event::Code(code) => {
-                has_content = true;
-                spans.push(Span::styled(code.to_string(), theme.code));
+                spans.push(Span::styled(code.to_string(), code_style));
             }
             _ => {}
         }
-    }
-
-    // If we didn't get any content from parsing (e.g., blank line or unparseable),
-    // just return the raw text
-    if !has_content && !is_heading {
-        spans.push(Span::styled(line.to_string(), theme.base));
     }
 
     spans
