@@ -21,8 +21,8 @@ pub mod ui;
 // pub mod toc;
 #[cfg(feature = "watch")]
 pub mod watcher;
-// #[cfg(feature = "git")]
-// pub mod diff_worker;
+#[cfg(feature = "git")]
+pub mod diff_worker;
 
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyEventKind};
@@ -113,6 +113,19 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                         app.doc.dirty_on_disk = true;
                     }
                 }
+            }
+        }
+
+        // Check for diff results from worker
+        #[cfg(feature = "git")]
+        {
+            if let Some(result) = app.diff_worker.try_recv_result() {
+                // Check if result matches current document revision
+                if result.doc_id == 0 && result.rev == app.doc.rev {
+                    // Apply the diff gutter
+                    app.doc.diff_gutter = result.gutter;
+                }
+                // Otherwise discard stale result
             }
         }
     }

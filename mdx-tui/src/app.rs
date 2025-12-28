@@ -53,6 +53,8 @@ pub struct App {
     pub should_quit: bool,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
+    #[cfg(feature = "git")]
+    pub diff_worker: crate::diff_worker::DiffWorker,
 }
 
 impl App {
@@ -70,6 +72,22 @@ impl App {
             None
         };
 
+        #[cfg(feature = "git")]
+        let diff_worker = {
+            let worker = crate::diff_worker::DiffWorker::spawn();
+            // Send initial diff request
+            if config.git.diff {
+                let current_text: String = doc.rope.chunks().collect();
+                worker.request_diff(crate::diff_worker::DiffRequest {
+                    doc_id: 0,
+                    path: doc.path.clone(),
+                    rev: doc.rev,
+                    current_text,
+                });
+            }
+            worker
+        };
+
         Self {
             config,
             doc,
@@ -83,6 +101,8 @@ impl App {
             should_quit: false,
             #[cfg(feature = "watch")]
             watcher,
+            #[cfg(feature = "git")]
+            diff_worker,
         }
     }
 
@@ -100,6 +120,18 @@ impl App {
         for pane in self.panes.panes.values_mut() {
             pane.view.cursor_line = pane.view.cursor_line.min(max_line);
             pane.view.scroll_line = pane.view.scroll_line.min(max_line);
+        }
+
+        // Request diff computation in background
+        #[cfg(feature = "git")]
+        if self.config.git.diff {
+            let current_text: String = self.doc.rope.chunks().collect();
+            self.diff_worker.request_diff(crate::diff_worker::DiffRequest {
+                doc_id: 0,
+                path: self.doc.path.clone(),
+                rev: self.doc.rev,
+                current_text,
+            });
         }
 
         Ok(())

@@ -720,7 +720,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] UI remains responsive during diff
 - [ ] Worker doesn't crash on malformed input
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
