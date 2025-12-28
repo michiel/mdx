@@ -83,6 +83,13 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     let line_count = app.doc.line_count();
 
+    // Get search query for highlighting
+    let search_query = if !app.search_query.is_empty() {
+        Some(app.search_query.as_str())
+    } else {
+        None
+    };
+
     // Determine if we're in a code block at the scroll position
     // by quickly scanning lines before the viewport
     let mut in_code_block = false;
@@ -143,11 +150,15 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             in_code_block = !in_code_block;
             line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
         } else if in_code_block {
-            // Inside code block - render as code
-            line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+            // Inside code block - render as code with search highlighting
+            if let Some(query) = search_query {
+                line_spans.extend(highlight_text_matches(line_text, query, app.theme.code));
+            } else {
+                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+            }
         } else {
             // Apply markdown styling to the line
-            line_spans.extend(style_markdown_line(line_text, &app.theme));
+            line_spans.extend(style_markdown_line(line_text, &app.theme, search_query));
         }
 
         // Check if this line is selected or cursor
@@ -184,8 +195,47 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     frame.render_widget(paragraph, area);
 }
 
+/// Highlight text matches within a string
+fn highlight_text_matches(text: &str, query: &str, base_style: Style) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+
+    let mut last_end = 0;
+
+    for (idx, _) in lower_text.match_indices(&lower_query) {
+        // Add text before match
+        if idx > last_end {
+            spans.push(Span::styled(text[last_end..idx].to_string(), base_style));
+        }
+
+        // Add highlighted match
+        spans.push(Span::styled(
+            text[idx..idx + query.len()].to_string(),
+            Style::default()
+                .bg(Color::Yellow)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        last_end = idx + query.len();
+    }
+
+    // Add remaining text
+    if last_end < text.len() {
+        spans.push(Span::styled(text[last_end..].to_string(), base_style));
+    }
+
+    // If no matches, return original text
+    if spans.is_empty() {
+        spans.push(Span::styled(text.to_string(), base_style));
+    }
+
+    spans
+}
+
 /// Style a single line of markdown text
-fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'static>> {
+fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
     // Check for horizontal rule
@@ -221,7 +271,7 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
                 ));
             } else {
                 // Style content within cell
-                spans.extend(style_inline_markdown(part, theme.base, theme.code));
+                spans.extend(style_inline_markdown(part, theme.base, theme.code, search_query));
             }
         }
         return spans;
@@ -262,7 +312,7 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
             Style::default().fg(Color::Yellow),
         ));
         // Style the rest as inline markdown
-        spans.extend(style_inline_markdown(content, theme.base, theme.code));
+        spans.extend(style_inline_markdown(content, theme.base, theme.code, search_query));
         return spans;
     }
 
@@ -299,18 +349,22 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme) -> Vec<Span<'sta
         theme.base
     };
 
-    spans.extend(style_inline_markdown(content, base_style, theme.code));
+    spans.extend(style_inline_markdown(content, base_style, theme.code, search_query));
 
     // If we didn't get any spans, just return the raw text
     if spans.is_empty() {
-        spans.push(Span::styled(line.to_string(), theme.base));
+        if let Some(query) = search_query {
+            spans.extend(highlight_text_matches(line, query, theme.base));
+        } else {
+            spans.push(Span::styled(line.to_string(), theme.base));
+        }
     }
 
     spans
 }
 
 /// Style inline markdown (bold, italic, code) within text
-fn style_inline_markdown(text: &str, base_style: Style, code_style: Style) -> Vec<Span<'static>> {
+fn style_inline_markdown(text: &str, base_style: Style, code_style: Style, search_query: Option<&str>) -> Vec<Span<'static>> {
     use pulldown_cmark::{Parser, Event, Tag, TagEnd};
 
     let mut spans = Vec::new();
@@ -340,10 +394,21 @@ fn style_inline_markdown(text: &str, base_style: Style, code_style: Style) -> Ve
                 if in_italic {
                     style = style.add_modifier(Modifier::ITALIC);
                 }
-                spans.push(Span::styled(content.to_string(), style));
+
+                // Apply search highlighting if query present
+                if let Some(query) = search_query {
+                    spans.extend(highlight_text_matches(&content, query, style));
+                } else {
+                    spans.push(Span::styled(content.to_string(), style));
+                }
             }
             Event::Code(code) => {
-                spans.push(Span::styled(code.to_string(), code_style));
+                // Apply search highlighting to code if query present
+                if let Some(query) = search_query {
+                    spans.extend(highlight_text_matches(&code, query, code_style));
+                } else {
+                    spans.push(Span::styled(code.to_string(), code_style));
+                }
             }
             _ => {}
         }
@@ -410,6 +475,40 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // Check if we're in search mode
+    let in_search_mode = if let Some(pane) = app.panes.focused_pane() {
+        pane.view.mode == crate::app::Mode::Search
+    } else {
+        false
+    };
+
+    // In search mode, show search input
+    if in_search_mode {
+        let search_prompt = if !app.search_matches.is_empty() {
+            if let Some(current_idx) = app.search_current_match {
+                format!("/{} [{}/{}] ", app.search_query, current_idx + 1, app.search_matches.len())
+            } else {
+                format!("/{} ", app.search_query)
+            }
+        } else if !app.search_query.is_empty() {
+            format!("/{} [no matches] ", app.search_query)
+        } else {
+            "/".to_string()
+        };
+
+        let status = Paragraph::new(Line::from(vec![Span::styled(
+            search_prompt,
+            Style::default()
+                .fg(app.theme.status_bar_fg)
+                .bg(app.theme.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        frame.render_widget(status, area);
+        return;
+    }
+
+    // Normal status bar
     let filename = app
         .doc
         .path
