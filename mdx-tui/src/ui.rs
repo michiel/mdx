@@ -139,12 +139,14 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     // Build only visible lines
     let mut styled_lines: Vec<Line> = Vec::new();
+    let mut is_table_row_flags: Vec<bool> = Vec::new();
     // Account for borders (top and bottom borders take 2 lines)
     let content_height = area.height.saturating_sub(2) as usize;
     let visible_end = (scroll + content_height).min(line_count);
     let mut is_first_code_line = false;
 
-    for line_idx in scroll..visible_end {
+    let mut line_idx = scroll;
+    while line_idx < visible_end {
         let mut line_spans: Vec<Span> = Vec::new();
 
         // Get line text first to check if it's a fence
@@ -156,6 +158,38 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
         // Remove trailing newline for styling
         let line_text = line_text.trim_end_matches('\n');
+
+        // Table detection: header row followed by a separator row
+        if !in_code_block && line_idx + 1 < line_count {
+            let next_line: String = app.doc.rope.line(line_idx + 1).chunks().collect();
+            let next_line = next_line.trim_end_matches('\n');
+            if is_table_row(line_text) && is_table_separator_row(next_line) {
+                let (table_lines, consumed) = render_table_block(
+                    app,
+                    area,
+                    line_idx,
+                    visible_end,
+                    line_count,
+                    line_num_width,
+                    is_focused,
+                    cursor,
+                    selection_range,
+                    left_margin_width,
+                    search_query,
+                );
+
+                for line in table_lines {
+                    styled_lines.push(line);
+                    is_table_row_flags.push(true);
+                }
+
+                line_idx = line_idx.saturating_add(consumed);
+                continue;
+            }
+        }
+
+        // Track if this is a table row (before styling splits the pipes)
+        let is_table_row = line_text.contains('|');
 
         // Check for code block fence markers - skip rendering them
         if line_text.starts_with("```") {
@@ -174,6 +208,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             }
             in_code_block = !in_code_block;
             // Skip this line entirely (don't render fence markers)
+            line_idx += 1;
             continue;
         }
 
@@ -289,6 +324,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         }
 
         styled_lines.push(line);
+        is_table_row_flags.push(is_table_row);
+        line_idx += 1;
     }
 
     // Add border to pane with focus highlight
@@ -306,11 +343,9 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     let mut wrapped_lines: Vec<Line> = Vec::new();
     let indent_str = " ".repeat(content_start);
 
-    for line in styled_lines {
+    for (idx, line) in styled_lines.into_iter().enumerate() {
         // Check if this is a table row - if so, don't wrap it
-        let is_table_row = line.spans.iter().any(|span| {
-            span.content.contains('|')
-        });
+        let is_table_row = is_table_row_flags.get(idx).copied().unwrap_or(false);
 
         if is_table_row {
             // Don't wrap table rows, just add them as-is
@@ -697,6 +732,325 @@ fn highlight_text_matches(text: &str, query: &str, base_style: Style) -> Vec<Spa
     }
 
     spans
+}
+
+fn is_table_row(line: &str) -> bool {
+    !line.trim().is_empty() && line.contains('|')
+}
+
+fn split_table_cells(line: &str) -> Vec<String> {
+    let mut trimmed = line.trim();
+    if trimmed.starts_with('|') {
+        trimmed = &trimmed[1..];
+    }
+    if trimmed.ends_with('|') && trimmed.len() > 1 {
+        trimmed = &trimmed[..trimmed.len() - 1];
+    }
+    trimmed
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+fn is_table_separator_row(line: &str) -> bool {
+    if !is_table_row(line) {
+        return false;
+    }
+
+    let cells = split_table_cells(line);
+    if cells.is_empty() {
+        return false;
+    }
+
+    for cell in cells {
+        let trimmed = cell.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if !trimmed.chars().all(|c| c == '-' || c == ':' || c == ' ') {
+            return false;
+        }
+        let dash_count = trimmed.chars().filter(|c| *c == '-').count();
+        if dash_count < 3 {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn wrap_cell_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0;
+
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+        if current_len == 0 {
+            current.push_str(word);
+            current_len = word_len;
+        } else if current_len + 1 + word_len <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_len += 1 + word_len;
+        } else {
+            lines.push(current);
+            current = word.to_string();
+            current_len = word_len;
+        }
+    }
+
+    if current.is_empty() {
+        lines.push(String::new());
+    } else {
+        lines.push(current);
+    }
+
+    let mut wrapped: Vec<String> = Vec::new();
+    for line in lines {
+        let mut start = 0;
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            wrapped.push(String::new());
+            continue;
+        }
+        while start < chars.len() {
+            let end = (start + width).min(chars.len());
+            wrapped.push(chars[start..end].iter().collect());
+            start = end;
+        }
+    }
+
+    wrapped
+}
+
+fn compute_table_widths(rows: &[Vec<String>], content_width: usize) -> Vec<usize> {
+    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if col_count == 0 {
+        return Vec::new();
+    }
+
+    let mut widths = vec![0usize; col_count];
+    for row in rows {
+        for (idx, cell) in row.iter().enumerate() {
+            let width = cell.chars().count();
+            if width > widths[idx] {
+                widths[idx] = width;
+            }
+        }
+    }
+
+    let separator_overhead = 1 + col_count * 3;
+    let available = content_width.saturating_sub(separator_overhead);
+    if available == 0 {
+        return vec![1; col_count];
+    }
+
+    let min_width = if available < col_count * 3 { 1 } else { 3 };
+    for width in widths.iter_mut() {
+        if *width < min_width {
+            *width = min_width;
+        }
+    }
+
+    let mut total: usize = widths.iter().sum();
+    if total > available {
+        while total > available {
+            let mut max_idx = None;
+            let mut max_width = 0;
+            for (idx, width) in widths.iter().enumerate() {
+                if *width > max_width && *width > min_width {
+                    max_width = *width;
+                    max_idx = Some(idx);
+                }
+            }
+
+            if let Some(idx) = max_idx {
+                widths[idx] -= 1;
+                total -= 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    widths
+}
+
+fn build_table_separator_cell(width: usize, raw: &str) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let trimmed = raw.trim();
+    let mut cell: Vec<char> = vec!['-'; width];
+    if trimmed.starts_with(':') {
+        cell[0] = ':';
+    }
+    if trimmed.ends_with(':') {
+        cell[width - 1] = ':';
+    }
+    cell.iter().collect()
+}
+
+fn spans_visual_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn render_table_block(
+    app: &App,
+    area: ratatui::layout::Rect,
+    start_idx: usize,
+    visible_end: usize,
+    line_count: usize,
+    line_num_width: usize,
+    is_focused: bool,
+    cursor: usize,
+    selection_range: Option<(usize, usize)>,
+    left_margin_width: u16,
+    search_query: Option<&str>,
+) -> (Vec<Line<'static>>, usize) {
+    let mut table_rows: Vec<(usize, String)> = Vec::new();
+    let mut idx = start_idx;
+    while idx < line_count {
+        let line_text: String = app.doc.rope.line(idx).chunks().collect();
+        let line_text = line_text.trim_end_matches('\n').to_string();
+        if !is_table_row(&line_text) {
+            break;
+        }
+        table_rows.push((idx, line_text));
+        idx += 1;
+    }
+
+    let table_rows_len = table_rows.len();
+    let consumed = visible_end.saturating_sub(start_idx).min(table_rows_len);
+
+    let mut cell_rows: Vec<Vec<String>> = Vec::new();
+    for (_, row_text) in &table_rows {
+        cell_rows.push(split_table_cells(row_text));
+    }
+
+    let content_width = area.width.saturating_sub(2) as usize;
+    let content_width = content_width.saturating_sub(left_margin_width as usize);
+    let widths = compute_table_widths(&cell_rows, content_width);
+
+    let mut rendered: Vec<Line> = Vec::new();
+    let indent_str = " ".repeat(left_margin_width as usize);
+
+    for (row_idx, (source_idx, row_text)) in table_rows.iter().enumerate().take(consumed) {
+        let cells = split_table_cells(row_text);
+        let is_separator = row_idx == 1 && is_table_separator_row(row_text);
+
+        let mut padded_cells = cells.clone();
+        while padded_cells.len() < widths.len() {
+            padded_cells.push(String::new());
+        }
+
+        let mut wrapped_cells: Vec<Vec<String>> = Vec::new();
+        if !is_separator {
+            for (cell, width) in padded_cells.iter().zip(widths.iter()) {
+                wrapped_cells.push(wrap_cell_text(cell, *width));
+            }
+        }
+
+        let row_height = if is_separator {
+            1
+        } else {
+            wrapped_cells.iter().map(|c| c.len()).max().unwrap_or(1)
+        };
+
+        for line_offset in 0..row_height {
+            let mut line_spans: Vec<Span> = Vec::new();
+
+            if line_offset == 0 {
+                let line_num = format!("{:>width$} ", source_idx + 1, width = line_num_width);
+                let line_num_color = if is_focused && *source_idx == cursor {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                };
+                line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+
+                #[cfg(feature = "git")]
+                if app.config.git.diff {
+                    use mdx_core::diff::DiffMark;
+                    let gutter = match app.doc.diff_gutter.get(*source_idx) {
+                        DiffMark::None => "  ",
+                        DiffMark::Added => "+ ",
+                        DiffMark::Modified => "~ ",
+                        DiffMark::DeletedAfter(_) => "▾ ",
+                    };
+                    let gutter_color = match app.doc.diff_gutter.get(*source_idx) {
+                        DiffMark::None => Color::DarkGray,
+                        DiffMark::Added => Color::Green,
+                        DiffMark::Modified => Color::Yellow,
+                        DiffMark::DeletedAfter(_) => Color::Red,
+                    };
+                    line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+                } else {
+                    line_spans.push(Span::raw("  "));
+                }
+                #[cfg(not(feature = "git"))]
+                line_spans.push(Span::raw("  "));
+            } else {
+                line_spans.push(Span::raw(indent_str.clone()));
+            }
+
+            line_spans.push(Span::styled("|".to_string(), Style::default().fg(Color::Cyan)));
+
+            for (col_idx, width) in widths.iter().enumerate() {
+                line_spans.push(Span::raw(" ".to_string()));
+
+                if is_separator {
+                    let cell_text = build_table_separator_cell(*width, &padded_cells[col_idx]);
+                    line_spans.push(Span::styled(
+                        cell_text,
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                } else {
+                    let cell_line = wrapped_cells[col_idx].get(line_offset).map(String::as_str).unwrap_or("");
+                    let mut cell_spans = style_inline_markdown(
+                        cell_line,
+                        app.theme.base,
+                        app.theme.code,
+                        search_query,
+                    );
+
+                    let cell_width = spans_visual_width(&cell_spans);
+                    if cell_width < *width {
+                        let padding = " ".repeat(*width - cell_width);
+                        cell_spans.push(Span::styled(padding, app.theme.base));
+                    }
+                    line_spans.extend(cell_spans);
+                }
+
+                line_spans.push(Span::raw(" ".to_string()));
+                line_spans.push(Span::styled("|".to_string(), Style::default().fg(Color::Cyan)));
+            }
+
+            let mut line = Line::from(line_spans);
+
+            let is_selected = if let Some((start, end)) = selection_range {
+                *source_idx >= start && *source_idx <= end
+            } else {
+                false
+            };
+
+            if is_focused && is_selected {
+                line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+            } else if is_focused && *source_idx == cursor {
+                line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+            }
+
+            rendered.push(line);
+        }
+    }
+
+    (rendered, consumed)
 }
 
 /// Style a single line of markdown text
