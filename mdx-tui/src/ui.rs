@@ -150,12 +150,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             in_code_block = !in_code_block;
             line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
         } else if in_code_block {
-            // Inside code block - render as code with search highlighting
-            if let Some(query) = search_query {
-                line_spans.extend(highlight_text_matches(line_text, query, app.theme.code));
-            } else {
-                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
-            }
+            // Inside code block - render with syntax highlighting and different background
+            line_spans.extend(render_code_line(line_text, &app.theme, search_query));
         } else {
             // Apply markdown styling to the line
             line_spans.extend(style_markdown_line(line_text, &app.theme, search_query));
@@ -193,6 +189,122 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+}
+
+/// Render a code block line with syntax highlighting
+fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
+    // Code block background color
+    let code_bg = Color::Rgb(40, 44, 52); // Slightly darker background for code
+
+    // Define syntax highlighting colors
+    let keyword_color = Color::Rgb(198, 120, 221); // Purple for keywords
+    let string_color = Color::Rgb(152, 195, 121); // Green for strings
+    let comment_color = Color::Rgb(92, 99, 112);  // Gray for comments
+    let number_color = Color::Rgb(209, 154, 102); // Orange for numbers
+    let function_color = Color::Rgb(97, 175, 239); // Blue for functions
+
+    // Common keywords across languages
+    let keywords = [
+        "fn", "func", "function", "def", "class", "struct", "enum", "impl", "trait",
+        "let", "const", "var", "mut", "pub", "priv", "private", "public", "protected",
+        "if", "else", "match", "switch", "case", "for", "while", "loop", "break", "continue",
+        "return", "yield", "async", "await", "import", "export", "from", "use",
+        "type", "interface", "extends", "implements", "new", "this", "self", "super",
+    ];
+
+    let mut spans = Vec::new();
+    let mut i = 0;
+    let chars: Vec<char> = text.chars().collect();
+
+    while i < chars.len() {
+        // Check for comments
+        if i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '/' {
+            // Single-line comment - rest of line
+            let comment: String = chars[i..].iter().collect();
+            spans.push(Span::styled(
+                comment,
+                Style::default().fg(comment_color).bg(code_bg),
+            ));
+            break;
+        }
+
+        // Check for strings
+        if chars[i] == '"' || chars[i] == '\'' {
+            let quote = chars[i];
+            let start = i;
+            i += 1;
+            while i < chars.len() && chars[i] != quote {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 2; // Skip escaped character
+                } else {
+                    i += 1;
+                }
+            }
+            if i < chars.len() {
+                i += 1; // Include closing quote
+            }
+            let string: String = chars[start..i].iter().collect();
+            spans.push(Span::styled(
+                string,
+                Style::default().fg(string_color).bg(code_bg),
+            ));
+            continue;
+        }
+
+        // Check for numbers
+        if chars[i].is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_') {
+                i += 1;
+            }
+            let number: String = chars[start..i].iter().collect();
+            spans.push(Span::styled(
+                number,
+                Style::default().fg(number_color).bg(code_bg),
+            ));
+            continue;
+        }
+
+        // Check for keywords and identifiers
+        if chars[i].is_alphabetic() || chars[i] == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+
+            // Check if it's a keyword
+            if keywords.contains(&word.as_str()) {
+                spans.push(Span::styled(
+                    word,
+                    Style::default().fg(keyword_color).bg(code_bg).add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                // Regular identifier - check if followed by '(' for function
+                let is_function = i < chars.len() && chars[i] == '(';
+                let color = if is_function { function_color } else { theme.code.fg.unwrap_or(Color::White) };
+                spans.push(Span::styled(
+                    word,
+                    Style::default().fg(color).bg(code_bg),
+                ));
+            }
+            continue;
+        }
+
+        // Regular character
+        let ch = chars[i].to_string();
+        spans.push(Span::styled(
+            ch,
+            Style::default().fg(theme.code.fg.unwrap_or(Color::White)).bg(code_bg),
+        ));
+        i += 1;
+    }
+
+    // TODO: Apply search highlighting on top of syntax highlighting
+    // This is complex as it requires re-parsing with highlight preservation
+    let _ = search_query;
+
+    spans
 }
 
 /// Highlight text matches within a string
