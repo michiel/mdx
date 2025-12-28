@@ -62,6 +62,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
+    use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+    use ratatui::text::Span;
+
     // Get the pane's view state
     let pane = match app.panes.panes.get(&pane_id) {
         Some(p) => p,
@@ -71,7 +74,6 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     // Get markdown content from document
     let content: String = app.doc.rope.chunks().collect();
 
-    // Convert to lines with cursor and selection highlighting
     let scroll = pane.view.scroll_line;
     let cursor = pane.view.cursor_line;
     let is_focused = app.panes.focused == pane_id;
@@ -83,57 +85,198 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         None
     };
 
-    let lines: Vec<Line> = content
-        .lines()
-        .enumerate()
-        .skip(scroll)
-        .take(area.height as usize)
-        .map(|(idx, text)| {
-            // Get diff mark for this line
-            #[cfg(feature = "git")]
-            let gutter = if app.config.git.diff {
-                use mdx_core::diff::DiffMark;
-                match app.doc.diff_gutter.get(idx) {
-                    DiffMark::None => "  ",
-                    DiffMark::Added => "+ ",
-                    DiffMark::Modified => "~ ",
-                    DiffMark::DeletedAfter(_) => "▾ ",
+    // Parse markdown and convert to styled lines
+    let parser = Parser::new(&content);
+    let mut lines: Vec<(Line, usize)> = Vec::new(); // (Line, source_line)
+    let mut current_line_spans: Vec<Span> = Vec::new();
+    let mut source_line = 0;
+    let mut in_code_block = false;
+    let mut in_bold = false;
+    let mut in_italic = false;
+    let mut in_heading = false;
+    let mut heading_level = 0;
+
+    // Add diff gutter for first line
+    #[cfg(feature = "git")]
+    let first_gutter = if app.config.git.diff {
+        use mdx_core::diff::DiffMark;
+        match app.doc.diff_gutter.get(0) {
+            DiffMark::None => "  ",
+            DiffMark::Added => "+ ",
+            DiffMark::Modified => "~ ",
+            DiffMark::DeletedAfter(_) => "▾ ",
+        }
+    } else {
+        "  "
+    };
+    #[cfg(not(feature = "git"))]
+    let first_gutter = "  ";
+
+    current_line_spans.push(Span::raw(first_gutter));
+
+    for event in parser {
+        match event {
+            Event::Start(tag) => match tag {
+                Tag::Heading { level, .. } => {
+                    in_heading = true;
+                    heading_level = level as usize;
                 }
-            } else {
-                "  "
-            };
-            #[cfg(not(feature = "git"))]
-            let gutter = "  ";
+                Tag::CodeBlock(_) => {
+                    in_code_block = true;
+                }
+                Tag::Strong => {
+                    in_bold = true;
+                }
+                Tag::Emphasis => {
+                    in_italic = true;
+                }
+                _ => {}
+            },
+            Event::End(tag) => match tag {
+                TagEnd::Heading(_) => {
+                    in_heading = false;
+                    heading_level = 0;
+                }
+                TagEnd::CodeBlock => {
+                    in_code_block = false;
+                }
+                TagEnd::Strong => {
+                    in_bold = false;
+                }
+                TagEnd::Emphasis => {
+                    in_italic = false;
+                }
+                TagEnd::Paragraph => {
+                    // Finish current line
+                    if !current_line_spans.is_empty() {
+                        lines.push((Line::from(current_line_spans.clone()), source_line));
+                        current_line_spans.clear();
+                        source_line += 1;
 
-            let line_text = format!("{}{}", gutter, text);
+                        // Add gutter for next line
+                        #[cfg(feature = "git")]
+                        if app.config.git.diff {
+                            use mdx_core::diff::DiffMark;
+                            let gutter = match app.doc.diff_gutter.get(source_line) {
+                                DiffMark::None => "  ",
+                                DiffMark::Added => "+ ",
+                                DiffMark::Modified => "~ ",
+                                DiffMark::DeletedAfter(_) => "▾ ",
+                            };
+                            current_line_spans.push(Span::raw(gutter));
+                        } else {
+                            current_line_spans.push(Span::raw("  "));
+                        }
+                        #[cfg(not(feature = "git"))]
+                        current_line_spans.push(Span::raw("  "));
+                    }
+                }
+                _ => {}
+            },
+            Event::Text(text) => {
+                let mut style = app.theme.base;
 
-            // Check if line is in selection
+                if in_heading && heading_level > 0 && heading_level <= 6 {
+                    style = app.theme.heading[heading_level - 1];
+                } else if in_code_block {
+                    style = app.theme.code;
+                } else {
+                    if in_bold {
+                        style = style.add_modifier(Modifier::BOLD);
+                    }
+                    if in_italic {
+                        style = style.add_modifier(Modifier::ITALIC);
+                    }
+                }
+
+                // Handle newlines in text
+                for (i, line_text) in text.split('\n').enumerate() {
+                    if i > 0 {
+                        lines.push((Line::from(current_line_spans.clone()), source_line));
+                        current_line_spans.clear();
+                        source_line += 1;
+
+                        // Add gutter
+                        #[cfg(feature = "git")]
+                        if app.config.git.diff {
+                            use mdx_core::diff::DiffMark;
+                            let gutter = match app.doc.diff_gutter.get(source_line) {
+                                DiffMark::None => "  ",
+                                DiffMark::Added => "+ ",
+                                DiffMark::Modified => "~ ",
+                                DiffMark::DeletedAfter(_) => "▾ ",
+                            };
+                            current_line_spans.push(Span::raw(gutter));
+                        } else {
+                            current_line_spans.push(Span::raw("  "));
+                        }
+                        #[cfg(not(feature = "git"))]
+                        current_line_spans.push(Span::raw("  "));
+                    }
+                    if !line_text.is_empty() {
+                        current_line_spans.push(Span::styled(line_text.to_string(), style));
+                    }
+                }
+            }
+            Event::Code(code) => {
+                current_line_spans.push(Span::styled(code.to_string(), app.theme.code));
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                lines.push((Line::from(current_line_spans.clone()), source_line));
+                current_line_spans.clear();
+                source_line += 1;
+
+                // Add gutter
+                #[cfg(feature = "git")]
+                if app.config.git.diff {
+                    use mdx_core::diff::DiffMark;
+                    let gutter = match app.doc.diff_gutter.get(source_line) {
+                        DiffMark::None => "  ",
+                        DiffMark::Added => "+ ",
+                        DiffMark::Modified => "~ ",
+                        DiffMark::DeletedAfter(_) => "▾ ",
+                    };
+                    current_line_spans.push(Span::raw(gutter));
+                } else {
+                    current_line_spans.push(Span::raw("  "));
+                }
+                #[cfg(not(feature = "git"))]
+                current_line_spans.push(Span::raw("  "));
+            }
+            _ => {}
+        }
+    }
+
+    // Add any remaining spans
+    if !current_line_spans.is_empty() {
+        lines.push((Line::from(current_line_spans), source_line));
+    }
+
+    // Apply cursor and selection highlighting, then scrolling
+    let visible_lines: Vec<Line> = lines
+        .into_iter()
+        .map(|(line, src_line)| {
+            // Check if this source line is in selection
             let is_selected = if let Some((start, end)) = selection_range {
-                idx >= start && idx <= end
+                src_line >= start && src_line <= end
             } else {
                 false
             };
 
-            // Highlight selected lines
+            // Apply highlighting based on state
             if is_focused && is_selected {
-                Line::from(line_text).style(
-                    Style::default()
-                        .fg(app.theme.base.fg.unwrap_or(Color::White))
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::REVERSED)
-                )
-            }
-            // Highlight cursor line (only if focused and not selected)
-            else if is_focused && idx == cursor && !is_selected {
-                Line::from(line_text).style(
-                    Style::default()
-                        .fg(app.theme.base.fg.unwrap_or(Color::White))
-                        .bg(app.theme.cursor_line_bg)
-                )
+                // Selected line in visual line mode
+                line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED))
+            } else if is_focused && src_line == cursor {
+                // Cursor line when focused
+                line.style(Style::default().bg(app.theme.cursor_line_bg))
             } else {
-                Line::from(line_text).style(app.theme.base)
+                // Normal line
+                line
             }
         })
+        .skip(scroll)
+        .take(area.height as usize)
         .collect();
 
     // Add border to pane with focus highlight
@@ -143,7 +286,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         Style::default().fg(app.theme.toc_border)
     };
 
-    let paragraph = Paragraph::new(lines)
+    let paragraph = Paragraph::new(visible_lines)
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
         .style(app.theme.base);
 

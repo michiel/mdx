@@ -21,6 +21,7 @@ ratatui = { workspace = true }
 crossterm = { workspace = true }
 unicode-width = { workspace = true }
 tui-markdown = { workspace = true }
+pulldown-cmark = { workspace = true }
 
 # Event bus
 crossbeam-channel = { workspace = true }
