@@ -69,6 +69,67 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Continue);
     }
 
+    // Handle TOC dialog
+    if app.show_toc_dialog {
+        let dialog_height = viewport_height;
+
+        match key {
+            // j or Down - move down in TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_dialog_move_down(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // k or Up - move up in TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_dialog_move_up(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // Enter - jump to selected heading and close dialog
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                app.toc_dialog_jump_to_selected();
+                return Ok(Action::Continue);
+            }
+
+            // Esc or T - close TOC dialog
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('T'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.toggle_toc_dialog();
+                return Ok(Action::Continue);
+            }
+
+            _ => return Ok(Action::Continue),
+        }
+    }
+
     // Handle key prefix sequences
     if app.key_prefix == KeyPrefix::CtrlW {
         // Compute pane layouts for focus movement
@@ -464,10 +525,10 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 return Ok(Action::Continue);
             }
 
-            // T or Esc - close TOC
+            // t or Esc - close TOC
             KeyEvent {
-                code: KeyCode::Char('T'),
-                modifiers: KeyModifiers::SHIFT,
+                code: KeyCode::Char('t'),
+                modifiers: KeyModifiers::NONE,
                 ..
             }
             | KeyEvent {
@@ -581,7 +642,20 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Continue);
     }
 
-    // T - toggle TOC
+    // t - toggle TOC sidebar
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('t'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.toggle_toc();
+        return Ok(Action::Continue);
+    }
+
+    // T - open TOC dialog
     if matches!(
         key,
         KeyEvent {
@@ -590,7 +664,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             ..
         }
     ) {
-        app.toggle_toc();
+        app.toggle_toc_dialog();
         return Ok(Action::Continue);
     }
 
@@ -631,12 +705,27 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::OpenEditor);
     }
 
-    // r - reload document from disk
+    // r - toggle raw/rendered mode in active pane
     if matches!(
         key,
         KeyEvent {
             code: KeyCode::Char('r'),
             modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        if let Some(pane) = app.panes.focused_pane_mut() {
+            pane.view.show_raw = !pane.view.show_raw;
+        }
+        return Ok(Action::Continue);
+    }
+
+    // R - reload document from disk
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('R'),
+            modifiers: KeyModifiers::SHIFT,
             ..
         }
     ) {

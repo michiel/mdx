@@ -26,6 +26,7 @@ pub struct ViewState {
     pub cursor_line: usize,
     pub mode: Mode,
     pub selection: Option<LineSelection>,
+    pub show_raw: bool, // Toggle between rendered markdown and raw text
 }
 
 impl ViewState {
@@ -36,6 +37,7 @@ impl ViewState {
             cursor_line: 0,
             mode: Mode::Normal,
             selection: None,
+            show_raw: false,
         }
     }
 }
@@ -51,6 +53,9 @@ pub struct App {
     pub toc_focus: bool,
     pub toc_selected: usize,
     pub toc_scroll: usize,
+    pub show_toc_dialog: bool,
+    pub toc_dialog_selected: usize,
+    pub toc_dialog_scroll: usize,
     pub key_prefix: KeyPrefix,
     pub should_quit: bool,
     pub search_query: String,
@@ -104,6 +109,9 @@ impl App {
             toc_focus: false,
             toc_selected: 0,
             toc_scroll: 0,
+            show_toc_dialog: false,
+            toc_dialog_selected: 0,
+            toc_dialog_scroll: 0,
             key_prefix: KeyPrefix::None,
             should_quit: false,
             search_query: String::new(),
@@ -268,6 +276,58 @@ impl App {
                 pane.view.scroll_line = heading.line;
             }
         }
+    }
+
+    /// Toggle TOC dialog
+    pub fn toggle_toc_dialog(&mut self) {
+        self.show_toc_dialog = !self.show_toc_dialog;
+        if self.show_toc_dialog {
+            // Reset selection when opening
+            self.toc_dialog_selected = 0;
+            self.toc_dialog_scroll = 0;
+        }
+    }
+
+    /// Move TOC dialog selection down
+    pub fn toc_dialog_move_down(&mut self, dialog_height: usize) {
+        if !self.doc.headings.is_empty() {
+            self.toc_dialog_selected = (self.toc_dialog_selected + 1).min(self.doc.headings.len() - 1);
+            self.toc_dialog_auto_scroll(dialog_height);
+        }
+    }
+
+    /// Move TOC dialog selection up
+    pub fn toc_dialog_move_up(&mut self, dialog_height: usize) {
+        self.toc_dialog_selected = self.toc_dialog_selected.saturating_sub(1);
+        self.toc_dialog_auto_scroll(dialog_height);
+    }
+
+    /// Auto-scroll TOC dialog to keep selection visible
+    pub fn toc_dialog_auto_scroll(&mut self, dialog_height: usize) {
+        let selected = self.toc_dialog_selected;
+        let scroll = self.toc_dialog_scroll;
+
+        // Selection above viewport - scroll up
+        if selected < scroll {
+            self.toc_dialog_scroll = selected;
+        }
+        // Selection below viewport - scroll down
+        else if selected >= scroll + dialog_height {
+            self.toc_dialog_scroll = selected.saturating_sub(dialog_height - 1);
+        }
+    }
+
+    /// Jump to the selected heading in TOC dialog and close dialog
+    pub fn toc_dialog_jump_to_selected(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            if let Some(heading) = self.doc.headings.get(self.toc_dialog_selected) {
+                // Set cursor and scroll to make heading the top line
+                pane.view.cursor_line = heading.line;
+                pane.view.scroll_line = heading.line;
+            }
+        }
+        // Close the dialog
+        self.show_toc_dialog = false;
     }
 
     /// Get the index of the current heading based on cursor position

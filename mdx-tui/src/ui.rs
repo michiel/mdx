@@ -64,6 +64,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help_popup(frame, app);
     }
+
+    // Render TOC dialog if active
+    if app.show_toc_dialog {
+        render_toc_dialog(frame, app);
+    }
 }
 
 fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
@@ -88,6 +93,12 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     let line_count = app.doc.line_count();
 
+    // If in raw mode, render plain text without markdown processing
+    if pane.view.show_raw {
+        render_raw_text(frame, app, area, pane_id, scroll, cursor, is_focused, selection_range, line_count);
+        return;
+    }
+
     // Get search query for highlighting
     let search_query = if !app.search_query.is_empty() {
         Some(app.search_query.as_str())
@@ -98,10 +109,26 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     // Determine if we're in a code block at the scroll position
     // by quickly scanning lines before the viewport
     let mut in_code_block = false;
+    let mut code_block_lang = String::new();
     for line_idx in 0..scroll.min(line_count) {
         let line_text: String = app.doc.rope.line(line_idx).chunks().collect();
         if line_text.trim_end().starts_with("```") {
+            if !in_code_block {
+                // Opening fence - extract language
+                let lang = line_text.trim_end()
+                    .strip_prefix("```")
+                    .unwrap_or("")
+                    .trim();
+                code_block_lang = if lang.is_empty() {
+                    "plain".to_string()
+                } else {
+                    lang.to_string()
+                };
+            }
             in_code_block = !in_code_block;
+            if !in_code_block {
+                code_block_lang.clear();
+            }
         }
     }
 
@@ -115,9 +142,40 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     // Account for borders (top and bottom borders take 2 lines)
     let content_height = area.height.saturating_sub(2) as usize;
     let visible_end = (scroll + content_height).min(line_count);
+    let mut is_first_code_line = false;
 
     for line_idx in scroll..visible_end {
         let mut line_spans: Vec<Span> = Vec::new();
+
+        // Get line text first to check if it's a fence
+        let line_text: String = if line_idx < line_count {
+            app.doc.rope.line(line_idx).chunks().collect()
+        } else {
+            String::new()
+        };
+
+        // Remove trailing newline for styling
+        let line_text = line_text.trim_end_matches('\n');
+
+        // Check for code block fence markers - skip rendering them
+        if line_text.starts_with("```") {
+            if !in_code_block {
+                // Opening fence - extract language
+                let lang = line_text.strip_prefix("```").unwrap_or("").trim();
+                code_block_lang = if lang.is_empty() {
+                    "plain".to_string()
+                } else {
+                    lang.to_string()
+                };
+                is_first_code_line = true;
+            } else {
+                // Closing fence - clear language
+                code_block_lang.clear();
+            }
+            in_code_block = !in_code_block;
+            // Skip this line entirely (don't render fence markers)
+            continue;
+        }
 
         // Add line number
         let line_num = format!("{:>width$} ", line_idx + 1, width = line_num_width);
@@ -151,25 +209,10 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         #[cfg(not(feature = "git"))]
         line_spans.push(Span::raw("  "));
 
-        // Get line text
-        let line_text: String = if line_idx < line_count {
-            app.doc.rope.line(line_idx).chunks().collect()
-        } else {
-            String::new()
-        };
-
-        // Remove trailing newline for styling
-        let line_text = line_text.trim_end_matches('\n');
-
         // Track if this is a code block line for background styling
         let is_code_block_line;
 
-        // Check for code block markers
-        if line_text.starts_with("```") {
-            in_code_block = !in_code_block;
-            line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
-            is_code_block_line = true;
-        } else if in_code_block {
+        if in_code_block {
             // Inside code block - render with syntax highlighting and different background
             line_spans.extend(render_code_line(line_text, &app.theme, search_query));
             is_code_block_line = true;
@@ -177,6 +220,53 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             // Apply markdown styling to the line
             line_spans.extend(style_markdown_line(line_text, &app.theme, search_query));
             is_code_block_line = false;
+        }
+
+        // For code blocks, pad to full viewport width and add language label on first line
+        if is_code_block_line {
+            let line_visual_width: usize = line_spans.iter()
+                .map(|span| span.content.chars().count())
+                .sum();
+            // Calculate available width (area width - borders)
+            let available_width = area.width.saturating_sub(2) as usize;
+
+            if is_first_code_line && !code_block_lang.is_empty() {
+                // Add language label on the right side of the first line
+                let lang_label = format!(" {} ", code_block_lang);
+                let lang_width = lang_label.chars().count();
+                let remaining_width = available_width.saturating_sub(line_visual_width);
+
+                if remaining_width > lang_width {
+                    // Add padding before the label
+                    let padding_before = " ".repeat(remaining_width - lang_width);
+                    line_spans.push(Span::styled(
+                        padding_before,
+                        Style::default().bg(Color::Rgb(40, 44, 52))
+                    ));
+                    // Add the language label
+                    line_spans.push(Span::styled(
+                        lang_label,
+                        Style::default()
+                            .fg(Color::Rgb(120, 120, 120))
+                            .bg(Color::Rgb(40, 44, 52))
+                    ));
+                } else {
+                    // Not enough space for label, just pad
+                    let padding = " ".repeat(remaining_width);
+                    line_spans.push(Span::styled(
+                        padding,
+                        Style::default().bg(Color::Rgb(40, 44, 52))
+                    ));
+                }
+                is_first_code_line = false;
+            } else if line_visual_width < available_width {
+                // Regular code block line - just pad
+                let padding = " ".repeat(available_width - line_visual_width);
+                line_spans.push(Span::styled(
+                    padding,
+                    Style::default().bg(Color::Rgb(40, 44, 52))
+                ));
+            }
         }
 
         // Check if this line is selected or cursor
@@ -217,6 +307,17 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     let indent_str = " ".repeat(content_start);
 
     for line in styled_lines {
+        // Check if this is a table row - if so, don't wrap it
+        let is_table_row = line.spans.iter().any(|span| {
+            span.content.contains('|')
+        });
+
+        if is_table_row {
+            // Don't wrap table rows, just add them as-is
+            wrapped_lines.push(line);
+            continue;
+        }
+
         // Calculate the visual width of the line
         let mut current_width = 0;
         let mut current_line_spans: Vec<Span> = Vec::new();
@@ -331,6 +432,113 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     let paragraph = Paragraph::new(wrapped_lines)
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
+        .style(app.theme.base);
+
+    frame.render_widget(paragraph, area);
+}
+
+/// Render raw text without markdown processing
+fn render_raw_text(
+    frame: &mut Frame,
+    app: &App,
+    area: ratatui::layout::Rect,
+    _pane_id: usize,
+    scroll: usize,
+    cursor: usize,
+    is_focused: bool,
+    selection_range: Option<(usize, usize)>,
+    line_count: usize,
+) {
+    use ratatui::text::Span;
+
+    // Calculate left margin width for line numbers and gutter
+    let line_num_width = format!("{}", line_count).len().max(3);
+    let _gutter_width = 2; // Git gutter or spacing
+
+    // Build only visible lines
+    let mut lines: Vec<Line> = Vec::new();
+    let content_height = area.height.saturating_sub(2) as usize;
+    let visible_end = (scroll + content_height).min(line_count);
+
+    for line_idx in scroll..visible_end {
+        let mut line_spans: Vec<Span> = Vec::new();
+
+        // Get line text
+        let line_text: String = if line_idx < line_count {
+            app.doc.rope.line(line_idx).chunks().collect()
+        } else {
+            String::new()
+        };
+
+        // Remove trailing newline
+        let line_text = line_text.trim_end_matches('\n');
+
+        // Add line number
+        let line_num = format!("{:>width$} ", line_idx + 1, width = line_num_width);
+        let line_num_color = if is_focused && line_idx == cursor {
+            Color::White
+        } else {
+            Color::DarkGray
+        };
+        line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+
+        // Add diff gutter
+        #[cfg(feature = "git")]
+        if app.config.git.diff {
+            use mdx_core::diff::DiffMark;
+            let gutter = match app.doc.diff_gutter.get(line_idx) {
+                DiffMark::None => "  ",
+                DiffMark::Added => "+ ",
+                DiffMark::Modified => "~ ",
+                DiffMark::DeletedAfter(_) => "▾ ",
+            };
+            let gutter_color = match app.doc.diff_gutter.get(line_idx) {
+                DiffMark::None => Color::DarkGray,
+                DiffMark::Added => Color::Green,
+                DiffMark::Modified => Color::Yellow,
+                DiffMark::DeletedAfter(_) => Color::Red,
+            };
+            line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+        } else {
+            line_spans.push(Span::raw("  "));
+        }
+        #[cfg(not(feature = "git"))]
+        line_spans.push(Span::raw("  "));
+
+        // Add raw text content
+        line_spans.push(Span::styled(
+            line_text.to_string(),
+            app.theme.base,
+        ));
+
+        // Check if this line is selected or cursor
+        let is_selected = if let Some((start, end)) = selection_range {
+            line_idx >= start && line_idx <= end
+        } else {
+            false
+        };
+
+        let mut line = Line::from(line_spans);
+
+        // Apply highlighting - priority order: selection > cursor
+        if is_focused && is_selected {
+            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        } else if is_focused && line_idx == cursor {
+            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        }
+
+        lines.push(line);
+    }
+
+    // Create border style
+    let border_style = if is_focused {
+        Style::default().fg(app.theme.toc_active.bg.unwrap_or(Color::LightCyan))
+    } else {
+        Style::default().fg(app.theme.toc_border)
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).border_style(border_style).title(" Raw "))
         .style(app.theme.base);
 
     frame.render_widget(paragraph, area);
@@ -509,7 +717,7 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Op
     }
 
     // Check for table row (contains |)
-    if line.contains('|') && (line.trim_start().starts_with('|') || line.contains(" | ")) {
+    if line.contains('|') {
         // Simple table rendering - split by | and style each cell
         let parts: Vec<&str> = line.split('|').collect();
         for (i, part) in parts.iter().enumerate() {
@@ -646,10 +854,10 @@ fn style_inline_markdown(text: &str, base_style: Style, code_style: Style, searc
             Event::Text(content) => {
                 let mut style = base_style;
                 if in_bold {
-                    // Make bold text brighter/white for better visibility
-                    style = style
-                        .add_modifier(Modifier::BOLD)
-                        .fg(Color::White);
+                    // Make bold text bright yellow for better visibility
+                    style = Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD);
                 }
                 if in_italic {
                     style = style.add_modifier(Modifier::ITALIC);
@@ -933,10 +1141,12 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from(vec![
             Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
-        Line::from("  T                 Toggle Table of Contents"),
+        Line::from("  t                 Toggle TOC sidebar"),
+        Line::from("  T                 Open TOC dialog (full screen)"),
         Line::from("  M                 Toggle theme (dark/light)"),
         Line::from("  e                 Open in $EDITOR"),
-        Line::from("  r                 Reload document"),
+        Line::from("  r                 Toggle raw/rendered mode"),
+        Line::from("  R                 Reload document"),
         Line::from("  ?                 Toggle this help"),
         Line::from("  q                 Close pane (quit if last)"),
         Line::from("  Ctrl+C            Force quit"),
@@ -952,6 +1162,69 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Help - Press ? or Esc to close ")
+                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        )
+        .style(Style::default().bg(Color::Rgb(30, 34, 42)));
+
+    frame.render_widget(popup, popup_area);
+}
+
+fn render_toc_dialog(frame: &mut Frame, app: &App) {
+    use ratatui::widgets::Clear;
+
+    // Create a full-screen popup area with small margins
+    let area = frame.area();
+    let popup_width = area.width.saturating_sub(4);
+    let popup_height = area.height.saturating_sub(4);
+
+    let popup_area = ratatui::layout::Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Calculate visible TOC height (account for borders and title)
+    let toc_height = popup_height.saturating_sub(2) as usize;
+    let scroll = app.toc_dialog_scroll;
+
+    // Build visible TOC lines with indentation based on heading level
+    let toc_lines: Vec<Line> = app
+        .doc
+        .headings
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(toc_height)
+        .map(|(idx, heading)| {
+            // Indent based on level (2 spaces per level, starting from level 1)
+            let indent = "  ".repeat((heading.level as usize).saturating_sub(1));
+            let text = format!("{}{}", indent, heading.text);
+
+            // Highlight selected item
+            if idx == app.toc_dialog_selected {
+                Line::from(text).style(
+                    Style::default()
+                        .bg(Color::Cyan)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Line::from(text).style(Style::default().fg(Color::White))
+            }
+        })
+        .collect();
+
+    // Clear the background
+    frame.render_widget(Clear, popup_area);
+
+    // Render the TOC dialog
+    let popup = Paragraph::new(toc_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Table of Contents - j/k to navigate, Enter to jump, T/Esc to close ")
                 .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         )
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
