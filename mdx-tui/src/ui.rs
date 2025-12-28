@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -185,7 +185,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     let paragraph = Paragraph::new(visible_lines)
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
-        .style(app.theme.base);
+        .style(app.theme.base)
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 }
