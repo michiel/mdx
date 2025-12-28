@@ -243,9 +243,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         String::new()
     };
 
+    #[cfg(feature = "watch")]
+    let watch_str = if app.watcher.is_some() {
+        if app.doc.dirty_on_disk {
+            "  [DIRTY]"
+        } else {
+            "  [WATCH]"
+        }
+    } else {
+        ""
+    };
+    #[cfg(not(feature = "watch"))]
+    let watch_str = "";
+
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(

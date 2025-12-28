@@ -9,7 +9,7 @@ repository.workspace = true
 [features]
 default = ["clipboard", "watch", "git"]
 clipboard = ["mdx-core/clipboard", "dep:arboard"]
-watch = ["mdx-core/watch"]
+watch = ["mdx-core/watch", "dep:notify"]
 git = ["mdx-core/git"]
 
 [dependencies]
@@ -33,6 +33,9 @@ anyhow = { workspace = true }
 
 # Clipboard (optional)
 arboard = { workspace = true, optional = true }
+
+# File watching (optional)
+notify = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.14"

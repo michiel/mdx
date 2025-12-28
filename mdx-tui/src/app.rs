@@ -51,6 +51,8 @@ pub struct App {
     pub toc_selected: usize,
     pub key_prefix: KeyPrefix,
     pub should_quit: bool,
+    #[cfg(feature = "watch")]
+    pub watcher: Option<crate::watcher::FileWatcher>,
 }
 
 impl App {
@@ -60,6 +62,14 @@ impl App {
         let theme_variant = config.theme;
         let theme = Theme::for_variant(theme_variant);
         let panes = PaneManager::new(0); // Single pane for single document
+
+        #[cfg(feature = "watch")]
+        let watcher = if config.watch.enabled {
+            crate::watcher::FileWatcher::new(&doc.path).ok()
+        } else {
+            None
+        };
+
         Self {
             config,
             doc,
@@ -71,12 +81,28 @@ impl App {
             toc_selected: 0,
             key_prefix: KeyPrefix::None,
             should_quit: false,
+            #[cfg(feature = "watch")]
+            watcher,
         }
     }
 
     /// Handle quit request
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+
+    /// Reload document from disk
+    pub fn reload_document(&mut self) -> anyhow::Result<()> {
+        self.doc.reload()?;
+
+        // Clamp all pane cursors and scroll positions to new document length
+        let max_line = self.doc.line_count().saturating_sub(1);
+        for pane in self.panes.panes.values_mut() {
+            pane.view.cursor_line = pane.view.cursor_line.min(max_line);
+            pane.view.scroll_line = pane.view.scroll_line.min(max_line);
+        }
+
+        Ok(())
     }
 
     /// Move cursor down by n lines

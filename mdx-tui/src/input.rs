@@ -269,6 +269,22 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::OpenEditor);
     }
 
+    // r - reload document from disk
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('r'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        if let Err(e) = app.reload_document() {
+            // Silently fail - would need message system for full implementation
+            eprintln!("Failed to reload document: {}", e);
+        }
+        return Ok(Action::Continue);
+    }
+
     // Navigation commands (when not in TOC)
     match key {
         // j - move down

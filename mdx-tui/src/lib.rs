@@ -19,8 +19,8 @@ pub mod ui;
 
 // These will be added in later stages
 // pub mod toc;
-// #[cfg(feature = "watch")]
-// pub mod watcher;
+#[cfg(feature = "watch")]
+pub mod watcher;
 // #[cfg(feature = "git")]
 // pub mod diff_worker;
 
@@ -92,6 +92,25 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                         input::Action::Continue => {
                             // Nothing to do
                         }
+                    }
+                }
+            }
+        }
+
+        // Check for file changes (with debouncing)
+        #[cfg(feature = "watch")]
+        {
+            if let Some(ref mut watcher) = app.watcher {
+                if watcher.check_changed(250) {
+                    // File changed on disk after debounce period
+                    if app.config.watch.auto_reload {
+                        // Auto reload
+                        if let Err(e) = app.reload_document() {
+                            eprintln!("Failed to reload document: {}", e);
+                        }
+                    } else {
+                        // Just mark as dirty
+                        app.doc.dirty_on_disk = true;
                     }
                 }
             }

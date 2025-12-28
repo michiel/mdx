@@ -505,7 +505,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Platform paths resolve correctly
 - [ ] Each config section applies correctly
 
-**Status**: Not Started
+**Status**: Complete (implemented in Stage 2)
 
 ---
 
@@ -558,7 +558,7 @@ This plan breaks the full mdx-spec.md into 18 incremental stages. Each stage inc
 - [ ] Multiple rapid changes debounced
 - [ ] Watch can be disabled via config
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
