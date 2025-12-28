@@ -83,12 +83,21 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     let line_count = app.doc.line_count();
 
-    // Build lines preserving source structure
-    let mut styled_lines: Vec<Line> = Vec::new();
+    // Determine if we're in a code block at the scroll position
+    // by quickly scanning lines before the viewport
     let mut in_code_block = false;
-    let mut code_block_lang = String::new();
+    for line_idx in 0..scroll.min(line_count) {
+        let line_text: String = app.doc.rope.line(line_idx).chunks().collect();
+        if line_text.trim_end().starts_with("```") {
+            in_code_block = !in_code_block;
+        }
+    }
 
-    for line_idx in 0..line_count {
+    // Build only visible lines
+    let mut styled_lines: Vec<Line> = Vec::new();
+    let visible_end = (scroll + area.height as usize).min(line_count);
+
+    for line_idx in scroll..visible_end {
         let mut line_spans: Vec<Span> = Vec::new();
 
         // Add line number
@@ -131,17 +140,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
         // Check for code block markers
         if line_text.starts_with("```") {
-            if in_code_block {
-                // End of code block
-                in_code_block = false;
-                code_block_lang.clear();
-                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
-            } else {
-                // Start of code block
-                in_code_block = true;
-                code_block_lang = line_text.trim_start_matches('`').to_string();
-                line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
-            }
+            in_code_block = !in_code_block;
+            line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
         } else if in_code_block {
             // Inside code block - render as code
             line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
@@ -169,13 +169,6 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         styled_lines.push(line);
     }
 
-    // Apply scrolling
-    let visible_lines: Vec<Line> = styled_lines
-        .into_iter()
-        .skip(scroll)
-        .take(area.height as usize)
-        .collect();
-
     // Add border to pane with focus highlight
     let border_style = if is_focused {
         Style::default().fg(app.theme.toc_active.bg.unwrap_or(Color::LightCyan))
@@ -183,7 +176,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         Style::default().fg(app.theme.toc_border)
     };
 
-    let paragraph = Paragraph::new(visible_lines)
+    let paragraph = Paragraph::new(styled_lines)
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
         .style(app.theme.base)
         .wrap(Wrap { trim: false });
@@ -438,6 +431,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                 });
                 ("V-LINE", count)
             }
+            crate::app::Mode::Search => ("SEARCH", None),
         };
         (line, mode, sel_count)
     } else {

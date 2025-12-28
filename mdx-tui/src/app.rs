@@ -9,6 +9,7 @@ use crate::theme::Theme;
 pub enum Mode {
     Normal,
     VisualLine,
+    Search,
 }
 
 /// Key prefix state for multi-key sequences
@@ -51,6 +52,9 @@ pub struct App {
     pub toc_selected: usize,
     pub key_prefix: KeyPrefix,
     pub should_quit: bool,
+    pub search_query: String,
+    pub search_matches: Vec<usize>,
+    pub search_current_match: Option<usize>,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -99,6 +103,9 @@ impl App {
             toc_selected: 0,
             key_prefix: KeyPrefix::None,
             should_quit: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_current_match: None,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
