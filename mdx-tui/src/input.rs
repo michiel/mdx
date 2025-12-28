@@ -185,6 +185,25 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 return Ok(Action::Continue);
             }
 
+            // Arrow keys - same as j/k in TOC
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_move_down();
+                return Ok(Action::Continue);
+            }
+
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_move_up();
+                return Ok(Action::Continue);
+            }
+
             _ => {}
         }
     }
@@ -342,6 +361,70 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         KeyEvent {
             code: KeyCode::Char('G'),
             modifiers: KeyModifiers::SHIFT,
+            ..
+        } => {
+            let last_line = app.doc.line_count().saturating_sub(1);
+            app.jump_to_line(last_line);
+            app.auto_scroll(viewport_height);
+        }
+
+        // Arrow keys - same as j/k
+        KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            app.move_cursor_down(1);
+            app.auto_scroll(viewport_height);
+        }
+
+        KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            app.move_cursor_up(1);
+            app.auto_scroll(viewport_height);
+        }
+
+        // PageDown/PageUp - same as Ctrl+d/u
+        KeyEvent {
+            code: KeyCode::PageDown,
+            ..
+        } => {
+            app.scroll_half_page_down(viewport_height);
+            app.auto_scroll(viewport_height);
+        }
+
+        KeyEvent {
+            code: KeyCode::PageUp,
+            ..
+        } => {
+            app.scroll_half_page_up(viewport_height);
+            app.auto_scroll(viewport_height);
+        }
+
+        // Space - same as PageDown
+        KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            app.scroll_half_page_down(viewport_height);
+            app.auto_scroll(viewport_height);
+        }
+
+        // Home/End - same as g/G
+        KeyEvent {
+            code: KeyCode::Home,
+            ..
+        } => {
+            app.jump_to_line(0);
+            app.auto_scroll(viewport_height);
+        }
+
+        KeyEvent {
+            code: KeyCode::End,
             ..
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
