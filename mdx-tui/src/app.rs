@@ -50,11 +50,13 @@ pub struct App {
     pub show_toc: bool,
     pub toc_focus: bool,
     pub toc_selected: usize,
+    pub toc_scroll: usize,
     pub key_prefix: KeyPrefix,
     pub should_quit: bool,
     pub search_query: String,
     pub search_matches: Vec<usize>,
     pub search_current_match: Option<usize>,
+    pub show_help: bool,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -101,16 +103,23 @@ impl App {
             show_toc,
             toc_focus: false,
             toc_selected: 0,
+            toc_scroll: 0,
             key_prefix: KeyPrefix::None,
             should_quit: false,
             search_query: String::new(),
             search_matches: Vec::new(),
             search_current_match: None,
+            show_help: false,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
             diff_worker,
         }
+    }
+
+    /// Toggle help dialog
+    pub fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
     }
 
     /// Handle quit request
@@ -222,22 +231,42 @@ impl App {
     }
 
     /// Move TOC selection down
-    pub fn toc_move_down(&mut self) {
+    pub fn toc_move_down(&mut self, toc_height: usize) {
         if !self.doc.headings.is_empty() {
             self.toc_selected = (self.toc_selected + 1).min(self.doc.headings.len() - 1);
+            self.toc_auto_scroll(toc_height);
         }
     }
 
     /// Move TOC selection up
-    pub fn toc_move_up(&mut self) {
+    pub fn toc_move_up(&mut self, toc_height: usize) {
         self.toc_selected = self.toc_selected.saturating_sub(1);
+        self.toc_auto_scroll(toc_height);
     }
 
-    /// Jump to the selected heading in TOC
-    pub fn toc_jump_to_selected(&mut self, viewport_height: usize) {
-        if let Some(heading) = self.doc.headings.get(self.toc_selected) {
-            self.jump_to_line(heading.line);
-            self.auto_scroll(viewport_height);
+    /// Auto-scroll TOC to keep selection visible
+    pub fn toc_auto_scroll(&mut self, toc_height: usize) {
+        let selected = self.toc_selected;
+        let scroll = self.toc_scroll;
+
+        // Selection above viewport - scroll up
+        if selected < scroll {
+            self.toc_scroll = selected;
+        }
+        // Selection below viewport - scroll down
+        else if selected >= scroll + toc_height {
+            self.toc_scroll = selected.saturating_sub(toc_height - 1);
+        }
+    }
+
+    /// Jump to the selected heading in TOC, making it the top line
+    pub fn toc_jump_to_selected(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            if let Some(heading) = self.doc.headings.get(self.toc_selected) {
+                // Set cursor and scroll to make heading the top line
+                pane.view.cursor_line = heading.line;
+                pane.view.scroll_line = heading.line;
+            }
         }
     }
 
@@ -618,19 +647,19 @@ mod tests {
         let doc = create_test_doc(10);
         let mut app = App::new(config, doc);
 
-        // Initially shown (from config default)
-        assert!(app.show_toc);
-        assert!(!app.toc_focus);
-
-        // Toggle - should hide
-        app.toggle_toc();
+        // Initially hidden (from config default)
         assert!(!app.show_toc);
         assert!(!app.toc_focus);
 
-        // Toggle again - should show and focus
+        // Toggle - should show and focus
         app.toggle_toc();
         assert!(app.show_toc);
         assert!(app.toc_focus);
+
+        // Toggle again - should hide
+        app.toggle_toc();
+        assert!(!app.show_toc);
+        assert!(!app.toc_focus);
     }
 
     #[test]
@@ -648,26 +677,28 @@ mod tests {
 
         assert_eq!(app.toc_selected, 0);
 
+        let toc_height = 10; // Simulated TOC viewport height
+
         // Move down in TOC
-        app.toc_move_down();
+        app.toc_move_down(toc_height);
         assert_eq!(app.toc_selected, 1);
 
-        app.toc_move_down();
+        app.toc_move_down(toc_height);
         assert_eq!(app.toc_selected, 2);
 
         // Try to move beyond last heading
-        app.toc_move_down();
+        app.toc_move_down(toc_height);
         assert_eq!(app.toc_selected, 2); // Should stay at 2
 
         // Move up
-        app.toc_move_up();
+        app.toc_move_up(toc_height);
         assert_eq!(app.toc_selected, 1);
 
-        app.toc_move_up();
+        app.toc_move_up(toc_height);
         assert_eq!(app.toc_selected, 0);
 
         // Try to move above first heading
-        app.toc_move_up();
+        app.toc_move_up(toc_height);
         assert_eq!(app.toc_selected, 0); // Should stay at 0
     }
 
@@ -686,10 +717,13 @@ mod tests {
 
         // Jump to second heading
         app.toc_selected = 1;
-        app.toc_jump_to_selected(10);
+        app.toc_jump_to_selected();
 
         // Heading 2 should be at line 2 (0-indexed)
-        assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 2);
+        // And it should be the top line (scroll = cursor)
+        let pane = app.panes.focused_pane().unwrap();
+        assert_eq!(pane.view.cursor_line, 2);
+        assert_eq!(pane.view.scroll_line, 2);
     }
 
     #[test]

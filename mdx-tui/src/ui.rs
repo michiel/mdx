@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -59,6 +59,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Render status bar
     render_status_bar(frame, app, chunks[1]);
+
+    // Render help popup if active
+    if app.show_help {
+        render_help_popup(frame, app);
+    }
 }
 
 fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
@@ -100,17 +105,28 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         }
     }
 
+    // Calculate left margin width for line numbers and gutter
+    let line_num_width = format!("{}", line_count).len().max(3);
+    let gutter_width = 2; // Git gutter or spacing
+    let left_margin_width = (line_num_width + 1 + gutter_width) as u16; // +1 for space after line number
+
     // Build only visible lines
     let mut styled_lines: Vec<Line> = Vec::new();
-    let visible_end = (scroll + area.height as usize).min(line_count);
+    // Account for borders (top and bottom borders take 2 lines)
+    let content_height = area.height.saturating_sub(2) as usize;
+    let visible_end = (scroll + content_height).min(line_count);
 
     for line_idx in scroll..visible_end {
         let mut line_spans: Vec<Span> = Vec::new();
 
         // Add line number
-        let line_num_width = format!("{}", line_count).len().max(3);
         let line_num = format!("{:>width$} ", line_idx + 1, width = line_num_width);
-        line_spans.push(Span::styled(line_num, Style::default().fg(Color::DarkGray)));
+        let line_num_color = if is_focused && line_idx == cursor {
+            Color::White
+        } else {
+            Color::DarkGray
+        };
+        line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
 
         // Add diff gutter
         #[cfg(feature = "git")]
@@ -145,16 +161,22 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         // Remove trailing newline for styling
         let line_text = line_text.trim_end_matches('\n');
 
+        // Track if this is a code block line for background styling
+        let is_code_block_line;
+
         // Check for code block markers
         if line_text.starts_with("```") {
             in_code_block = !in_code_block;
             line_spans.push(Span::styled(line_text.to_string(), app.theme.code));
+            is_code_block_line = true;
         } else if in_code_block {
             // Inside code block - render with syntax highlighting and different background
             line_spans.extend(render_code_line(line_text, &app.theme, search_query));
+            is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
             line_spans.extend(style_markdown_line(line_text, &app.theme, search_query));
+            is_code_block_line = false;
         }
 
         // Check if this line is selected or cursor
@@ -166,11 +188,14 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
         let mut line = Line::from(line_spans);
 
-        // Apply highlighting
+        // Apply highlighting - priority order: selection > cursor > code block
         if is_focused && is_selected {
             line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
         } else if is_focused && line_idx == cursor {
             line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        } else if is_code_block_line {
+            // Apply code block background to entire line
+            line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
         }
 
         styled_lines.push(line);
@@ -183,10 +208,130 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         Style::default().fg(app.theme.toc_border)
     };
 
-    let paragraph = Paragraph::new(styled_lines)
+    // Manual wrapping to indent continuation lines
+    let available_width = area.width.saturating_sub(2) as usize; // -2 for borders
+    let content_start = left_margin_width as usize;
+    let content_width = available_width.saturating_sub(content_start);
+
+    let mut wrapped_lines: Vec<Line> = Vec::new();
+    let indent_str = " ".repeat(content_start);
+
+    for line in styled_lines {
+        // Calculate the visual width of the line
+        let mut current_width = 0;
+        let mut current_line_spans: Vec<Span> = Vec::new();
+        let mut first_segment = true;
+
+        for span in line.spans {
+            let span_text = span.content.to_string();
+            let span_width = span_text.chars().count();
+
+            if current_width + span_width <= available_width {
+                // Fits on current line
+                current_line_spans.push(span);
+                current_width += span_width;
+            } else {
+                // Need to wrap
+                if !current_line_spans.is_empty() {
+                    wrapped_lines.push(Line::from(current_line_spans.clone()));
+                    current_line_spans.clear();
+                    current_width = 0;
+                    first_segment = false;
+                }
+
+                // Add indentation for continuation lines
+                if !first_segment {
+                    current_line_spans.push(Span::raw(indent_str.clone()));
+                    current_width = content_start;
+                }
+
+                // Word-aware wrapping within the span
+                let mut remaining = span_text.as_str();
+                while !remaining.is_empty() {
+                    let available = if first_segment {
+                        available_width - current_width
+                    } else {
+                        content_width
+                    };
+
+                    let remaining_len = remaining.chars().count();
+
+                    if remaining_len <= available {
+                        // Entire remaining text fits
+                        current_line_spans.push(Span::styled(
+                            remaining.to_string(),
+                            span.style
+                        ));
+                        current_width += remaining_len;
+                        break;
+                    } else {
+                        // Need to wrap - find word boundary
+                        let mut split_at = 0;
+                        let mut last_word_end = None;
+                        let mut char_count = 0;
+
+                        for (byte_idx, ch) in remaining.char_indices() {
+                            if char_count >= available {
+                                break;
+                            }
+
+                            // Track word boundaries (space, tab, or punctuation followed by space)
+                            if ch.is_whitespace() {
+                                last_word_end = Some(byte_idx);
+                            }
+
+                            split_at = byte_idx + ch.len_utf8();
+                            char_count += 1;
+                        }
+
+                        // Prefer splitting at word boundary if we found one
+                        let split_pos = if let Some(word_end) = last_word_end {
+                            // Split at the word boundary, but skip the trailing whitespace
+                            let after_space = remaining[word_end..].char_indices()
+                                .skip_while(|(_, c)| c.is_whitespace())
+                                .next()
+                                .map(|(i, _)| word_end + i)
+                                .unwrap_or(word_end);
+                            (word_end, after_space)
+                        } else {
+                            // No word boundary found, fall back to character split
+                            // But ensure we split at least one character
+                            if split_at == 0 && !remaining.is_empty() {
+                                let first_char_len = remaining.chars().next().unwrap().len_utf8();
+                                split_at = first_char_len;
+                            }
+                            (split_at, split_at)
+                        };
+
+                        let (chunk, rest) = remaining.split_at(split_pos.0);
+                        let rest = &rest[split_pos.1 - split_pos.0..];
+
+                        if !chunk.is_empty() {
+                            current_line_spans.push(Span::styled(
+                                chunk.to_string(),
+                                span.style
+                            ));
+                        }
+
+                        wrapped_lines.push(Line::from(current_line_spans.clone()));
+                        current_line_spans.clear();
+                        current_line_spans.push(Span::raw(indent_str.clone()));
+                        current_width = content_start;
+                        remaining = rest;
+                        first_segment = false;
+                    }
+                }
+            }
+        }
+
+        if !current_line_spans.is_empty() {
+            wrapped_lines.push(Line::from(current_line_spans));
+        }
+    }
+
+    let paragraph = Paragraph::new(wrapped_lines)
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
-        .style(app.theme.base)
-        .wrap(Wrap { trim: false });
+        .style(app.theme.base);
 
     frame.render_widget(paragraph, area);
 }
@@ -501,7 +646,10 @@ fn style_inline_markdown(text: &str, base_style: Style, code_style: Style, searc
             Event::Text(content) => {
                 let mut style = base_style;
                 if in_bold {
-                    style = style.add_modifier(Modifier::BOLD);
+                    // Make bold text brighter/white for better visibility
+                    style = style
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::White);
                 }
                 if in_italic {
                     style = style.add_modifier(Modifier::ITALIC);
@@ -533,12 +681,18 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Get current heading index to highlight
     let current_heading = app.current_heading_index();
 
-    // Build TOC lines with indentation based on heading level
+    // Calculate visible TOC height (account for borders)
+    let toc_height = area.height.saturating_sub(2) as usize;
+    let scroll = app.toc_scroll;
+
+    // Build visible TOC lines with indentation based on heading level
     let toc_lines: Vec<Line> = app
         .doc
         .headings
         .iter()
         .enumerate()
+        .skip(scroll)
+        .take(toc_height)
         .map(|(idx, heading)| {
             // Indent based on level (2 spaces per level, starting from level 1)
             let indent = "  ".repeat((heading.level as usize).saturating_sub(1));
@@ -717,4 +871,90 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     )]));
 
     frame.render_widget(status, area);
+}
+
+fn render_help_popup(frame: &mut Frame, _app: &App) {
+    use ratatui::widgets::{Clear, Paragraph};
+
+    // Create a centered popup area
+    let area = frame.area();
+    let popup_width = 70.min(area.width.saturating_sub(4));
+    let popup_height = 33.min(area.height.saturating_sub(4));
+
+    let popup_area = ratatui::layout::Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Help text content
+    let help_lines = vec![
+        Line::from(vec![Span::styled(
+            "MDX - Keyboard Commands",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  j/k, ↓/↑          Move cursor down/up"),
+        Line::from("  Ctrl+d/u          Scroll half page down/up"),
+        Line::from("  Space, PgDn       Scroll full page down"),
+        Line::from("  PgUp              Scroll full page up"),
+        Line::from("  g, Home           Go to top"),
+        Line::from("  G, End            Go to bottom"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Search", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  /                 Start search"),
+        Line::from("  n                 Next match"),
+        Line::from("  N                 Previous match"),
+        Line::from("  Esc               Cancel search"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Visual Mode", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  V                 Enter visual line mode"),
+        Line::from("  Y                 Yank (copy) selected lines"),
+        Line::from("  Esc               Exit visual mode"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Panes", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  Ctrl+w s          Split horizontally"),
+        Line::from("  Ctrl+w v          Split vertically"),
+        Line::from("  Ctrl+w hjkl/↑↓←→  Move focus between panes"),
+        Line::from("  Ctrl+↑↓←→         Move focus between panes"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  T                 Toggle Table of Contents"),
+        Line::from("  M                 Toggle theme (dark/light)"),
+        Line::from("  e                 Open in $EDITOR"),
+        Line::from("  r                 Reload document"),
+        Line::from("  ?                 Toggle this help"),
+        Line::from("  q                 Close pane (quit if last)"),
+        Line::from("  Ctrl+C            Force quit"),
+    ];
+
+    // Clear the background
+    frame.render_widget(Clear, popup_area);
+
+    // Render the popup
+    let popup = Paragraph::new(help_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Help - Press ? or Esc to close ")
+                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        )
+        .style(Style::default().bg(Color::Rgb(30, 34, 42)));
+
+    frame.render_widget(popup, popup_area);
 }

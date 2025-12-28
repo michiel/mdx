@@ -15,7 +15,7 @@ pub enum Action {
 
 /// Handle a key event with viewport height for scroll commands
 pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Result<Action> {
-    // Handle quit with 'q'
+    // Handle close pane with 'q' - quit if last pane
     if matches!(
         key,
         KeyEvent {
@@ -24,8 +24,14 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             ..
         }
     ) {
-        app.quit();
-        return Ok(Action::Quit);
+        // Try to close the focused pane
+        let has_remaining_panes = app.panes.close_focused();
+        if !has_remaining_panes {
+            // Was the last pane, quit the app
+            app.quit();
+            return Ok(Action::Quit);
+        }
+        return Ok(Action::Continue);
     }
 
     // Handle Ctrl+C
@@ -41,8 +47,38 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Quit);
     }
 
+    // Handle help dialog - close with Esc or ?
+    if app.show_help {
+        if matches!(
+            key,
+            KeyEvent {
+                code: KeyCode::Esc,
+                ..
+            }
+        ) || matches!(
+            key,
+            KeyEvent {
+                code: KeyCode::Char('?'),
+                ..
+            }
+        ) {
+            app.toggle_help();
+            return Ok(Action::Continue);
+        }
+        // Ignore all other keys when help is shown
+        return Ok(Action::Continue);
+    }
+
     // Handle key prefix sequences
     if app.key_prefix == KeyPrefix::CtrlW {
+        // Compute pane layouts for focus movement
+        let pane_layouts = app.panes.compute_layout(ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        });
+
         match key {
             // ^w s - horizontal split
             KeyEvent {
@@ -62,6 +98,170 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 ..
             } => {
                 app.split_focused(SplitDir::Vertical);
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w ↑ - move focus up
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Up, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w ↓ - move focus down
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Down, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w ← - move focus left
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // Handle TOC focus if visible
+                if app.show_toc {
+                    if app.config.toc.side == mdx_core::config::TocSide::Left {
+                        if !app.toc_focus {
+                            app.toc_focus = true;
+                            app.key_prefix = KeyPrefix::None;
+                            return Ok(Action::Continue);
+                        }
+                    } else if app.toc_focus {
+                        app.toc_focus = false;
+                        app.key_prefix = KeyPrefix::None;
+                        return Ok(Action::Continue);
+                    }
+                }
+
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Left, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w → - move focus right
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // Handle TOC focus if visible
+                if app.show_toc {
+                    if app.config.toc.side == mdx_core::config::TocSide::Right {
+                        if !app.toc_focus {
+                            app.toc_focus = true;
+                            app.key_prefix = KeyPrefix::None;
+                            return Ok(Action::Continue);
+                        }
+                    } else if app.toc_focus {
+                        app.toc_focus = false;
+                        app.key_prefix = KeyPrefix::None;
+                        return Ok(Action::Continue);
+                    }
+                }
+
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Right, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w h - move focus left (vim-style)
+            KeyEvent {
+                code: KeyCode::Char('h'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // Handle TOC focus if visible
+                if app.show_toc {
+                    if app.config.toc.side == mdx_core::config::TocSide::Left {
+                        if !app.toc_focus {
+                            app.toc_focus = true;
+                            app.key_prefix = KeyPrefix::None;
+                            return Ok(Action::Continue);
+                        }
+                    } else if app.toc_focus {
+                        app.toc_focus = false;
+                        app.key_prefix = KeyPrefix::None;
+                        return Ok(Action::Continue);
+                    }
+                }
+
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Left, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w j - move focus down (vim-style)
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Down, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w k - move focus up (vim-style)
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Up, &pane_layouts);
+                }
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // ^w l - move focus right (vim-style)
+            KeyEvent {
+                code: KeyCode::Char('l'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // Handle TOC focus if visible
+                if app.show_toc {
+                    if app.config.toc.side == mdx_core::config::TocSide::Right {
+                        if !app.toc_focus {
+                            app.toc_focus = true;
+                            app.key_prefix = KeyPrefix::None;
+                            return Ok(Action::Continue);
+                        }
+                    } else if app.toc_focus {
+                        app.toc_focus = false;
+                        app.key_prefix = KeyPrefix::None;
+                        return Ok(Action::Continue);
+                    }
+                }
+
+                if !app.toc_focus {
+                    app.panes.move_focus(Direction::Right, &pane_layouts);
+                }
                 app.key_prefix = KeyPrefix::None;
                 return Ok(Action::Continue);
             }
@@ -86,7 +286,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         return Ok(Action::Continue);
     }
 
-    // Ctrl+Arrow keys - move focus between panes
+    // Ctrl+Arrow keys - move focus between panes and TOC
     let pane_layouts = app.panes.compute_layout(ratatui::layout::Rect {
         x: 0,
         y: 0,
@@ -100,7 +300,9 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.panes.move_focus(Direction::Up, &pane_layouts);
+            if !app.toc_focus {
+                app.panes.move_focus(Direction::Up, &pane_layouts);
+            }
             return Ok(Action::Continue);
         }
 
@@ -109,7 +311,9 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.panes.move_focus(Direction::Down, &pane_layouts);
+            if !app.toc_focus {
+                app.panes.move_focus(Direction::Down, &pane_layouts);
+            }
             return Ok(Action::Continue);
         }
 
@@ -118,7 +322,26 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.panes.move_focus(Direction::Left, &pane_layouts);
+            // Handle TOC focus if visible
+            if app.show_toc {
+                if app.config.toc.side == mdx_core::config::TocSide::Left {
+                    // TOC is on left
+                    if !app.toc_focus {
+                        app.toc_focus = true;
+                        return Ok(Action::Continue);
+                    }
+                } else {
+                    // TOC is on right, unfocus it if focused
+                    if app.toc_focus {
+                        app.toc_focus = false;
+                        return Ok(Action::Continue);
+                    }
+                }
+            }
+
+            if !app.toc_focus {
+                app.panes.move_focus(Direction::Left, &pane_layouts);
+            }
             return Ok(Action::Continue);
         }
 
@@ -127,7 +350,26 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.panes.move_focus(Direction::Right, &pane_layouts);
+            // Handle TOC focus if visible
+            if app.show_toc {
+                if app.config.toc.side == mdx_core::config::TocSide::Right {
+                    // TOC is on right
+                    if !app.toc_focus {
+                        app.toc_focus = true;
+                        return Ok(Action::Continue);
+                    }
+                } else {
+                    // TOC is on left, unfocus it if focused
+                    if app.toc_focus {
+                        app.toc_focus = false;
+                        return Ok(Action::Continue);
+                    }
+                }
+            }
+
+            if !app.toc_focus {
+                app.panes.move_focus(Direction::Right, &pane_layouts);
+            }
             return Ok(Action::Continue);
         }
 
@@ -183,6 +425,9 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
 
     // Handle TOC-specific keys when TOC is focused
     if app.toc_focus {
+        // TOC viewport height is similar to main viewport
+        let toc_height = viewport_height;
+
         match key {
             // j - move down in TOC
             KeyEvent {
@@ -190,7 +435,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                app.toc_move_down();
+                app.toc_move_down(toc_height);
                 return Ok(Action::Continue);
             }
 
@@ -200,7 +445,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                app.toc_move_up();
+                app.toc_move_up(toc_height);
                 return Ok(Action::Continue);
             }
 
@@ -214,7 +459,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                app.toc_jump_to_selected(viewport_height);
+                app.toc_jump_to_selected();
                 app.toc_focus = false; // Return focus to document
                 return Ok(Action::Continue);
             }
@@ -238,7 +483,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                app.toc_move_down();
+                app.toc_move_down(toc_height);
                 return Ok(Action::Continue);
             }
 
@@ -247,7 +492,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                app.toc_move_up();
+                app.toc_move_up(toc_height);
                 return Ok(Action::Continue);
             }
 
@@ -359,6 +604,18 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
         }
     ) {
         app.toggle_theme();
+        return Ok(Action::Continue);
+    }
+
+    // ? - toggle help dialog
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('?'),
+            ..
+        }
+    ) {
+        app.toggle_help();
         return Ok(Action::Continue);
     }
 
@@ -478,7 +735,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             code: KeyCode::PageDown,
             ..
         } => {
-            app.move_cursor_down(viewport_height.saturating_sub(2));
+            app.move_cursor_down(viewport_height);
             app.auto_scroll(viewport_height);
         }
 
@@ -486,7 +743,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             code: KeyCode::PageUp,
             ..
         } => {
-            app.move_cursor_up(viewport_height.saturating_sub(2));
+            app.move_cursor_up(viewport_height);
             app.auto_scroll(viewport_height);
         }
 
@@ -496,7 +753,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::NONE,
             ..
         } => {
-            app.move_cursor_down(viewport_height.saturating_sub(2));
+            app.move_cursor_down(viewport_height);
             app.auto_scroll(viewport_height);
         }
 

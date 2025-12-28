@@ -48,7 +48,8 @@ pub fn run(mut app: App) -> Result<()> {
 fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
     loop {
         // Get terminal size for viewport calculations
-        let viewport_height = terminal.size()?.height.saturating_sub(1) as usize; // -1 for status bar
+        // -1 for status bar, -2 for pane borders (top and bottom)
+        let viewport_height = terminal.size()?.height.saturating_sub(3) as usize;
 
         // Draw UI
         terminal

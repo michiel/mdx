@@ -222,6 +222,67 @@ impl PaneManager {
         }
     }
 
+    /// Close the focused pane. Returns false if this was the last pane.
+    pub fn close_focused(&mut self) -> bool {
+        let pane_id = self.focused;
+
+        // Get all leaf IDs before closing
+        let all_ids = self.root.leaf_ids();
+
+        // If this is the only pane, return false to signal quit
+        if all_ids.len() == 1 {
+            return false;
+        }
+
+        // Remove from storage
+        self.panes.remove(&pane_id);
+
+        // Remove from tree by collapsing the parent split
+        self.root = self.remove_leaf_from_tree(self.root.clone(), pane_id);
+
+        // Focus on the first remaining pane
+        let remaining_ids = self.root.leaf_ids();
+        if let Some(first_id) = remaining_ids.first() {
+            self.focused = *first_id;
+        }
+
+        true
+    }
+
+    /// Remove a leaf from the tree, collapsing its parent split
+    fn remove_leaf_from_tree(&self, node: PaneNode, target_id: PaneId) -> PaneNode {
+        match node {
+            PaneNode::Leaf(id) if id == target_id => {
+                // This shouldn't happen if called correctly
+                node
+            }
+            PaneNode::Leaf(_) => node,
+            PaneNode::Split { dir, left, right, ratio } => {
+                // Check if target is in left or right
+                let left_ids = left.leaf_ids();
+                let right_ids = right.leaf_ids();
+
+                if left_ids.contains(&target_id) && left_ids.len() == 1 {
+                    // Left is the target leaf, promote right
+                    *right
+                } else if right_ids.contains(&target_id) && right_ids.len() == 1 {
+                    // Right is the target leaf, promote left
+                    *left
+                } else {
+                    // Target is deeper in the tree, recurse
+                    let new_left = self.remove_leaf_from_tree(*left, target_id);
+                    let new_right = self.remove_leaf_from_tree(*right, target_id);
+                    PaneNode::Split {
+                        dir,
+                        left: Box::new(new_left),
+                        right: Box::new(new_right),
+                        ratio,
+                    }
+                }
+            }
+        }
+    }
+
     /// Move focus to the next pane in the given direction
     pub fn move_focus(&mut self, direction: Direction, layout: &HashMap<PaneId, Rect>) {
         let current_rect = match layout.get(&self.focused) {

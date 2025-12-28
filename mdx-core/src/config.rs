@@ -78,7 +78,7 @@ impl Default for Config {
 impl Default for TocConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             side: TocSide::Left,
             width: 32,
         }
@@ -161,7 +161,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.theme, ThemeVariant::Dark);
-        assert!(config.toc.enabled);
+        assert!(!config.toc.enabled);
         assert_eq!(config.toc.side, TocSide::Left);
         assert_eq!(config.toc.width, 32);
         assert_eq!(config.editor.command, "$EDITOR");
