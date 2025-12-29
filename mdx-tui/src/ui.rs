@@ -5,19 +5,38 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
 
 /// Draw the UI
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),    // Main content area (potentially split)
-            Constraint::Length(1), // Status bar
-        ])
-        .split(frame.area());
+    // Create base layout with optional security warnings pane
+    let base_chunks = if !app.security_warnings.is_empty() && app.show_security_warnings {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area (TOC + panes)
+                Constraint::Length(4),   // Security warnings pane
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(frame.area());
+
+        // Render security warnings pane
+        render_security_warnings(frame, chunks[1], &app.security_warnings, &app.theme);
+
+        [chunks[0], chunks[2]] // Return [content_area, status_area]
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(frame.area());
+
+        [chunks[0], chunks[1]] // Return [content_area, status_area]
+    };
 
     let pane_area = if app.show_toc {
         let toc_width = app.config.toc.width as u16;
@@ -28,7 +47,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                     Constraint::Length(toc_width), // TOC
                     Constraint::Min(1),            // Panes area
                 ])
-                .split(chunks[0])
+                .split(base_chunks[0])
         } else {
             Layout::default()
                 .direction(Direction::Horizontal)
@@ -36,7 +55,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                     Constraint::Min(1),            // Panes area
                     Constraint::Length(toc_width), // TOC
                 ])
-                .split(chunks[0])
+                .split(base_chunks[0])
         };
 
         // Render TOC based on position
@@ -48,7 +67,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             main_chunks[0]
         }
     } else {
-        chunks[0]
+        base_chunks[0]
     };
 
     // Compute layout for all panes and render them
@@ -58,7 +77,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     // Render status bar
-    render_status_bar(frame, app, chunks[1]);
+    render_status_bar(frame, app, base_chunks[1]);
 
     // Render help popup if active
     if app.show_help {
@@ -72,18 +91,45 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn sanitize_for_terminal(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    for ch in input.chars() {
-        if ch == '\x1b' {
-            continue;
-        }
-        if ch.is_control() {
-            output.push(' ');
-        } else {
-            output.push(ch);
-        }
-    }
-    output
+    input
+        .chars()
+        .filter(|&c| c == '\n' || c == '\t' || (c >= ' ' && c < '\x7f'))
+        .collect()
+}
+
+/// Render security warnings pane
+fn render_security_warnings(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    warnings: &[mdx_core::SecurityEvent],
+    theme: &crate::theme::Theme,
+) {
+    // Build warning items - show most recent first, limit to 100
+    let items: Vec<ListItem> = warnings
+        .iter()
+        .rev()
+        .take(100)
+        .map(|w| {
+            let color = match w.level {
+                mdx_core::SecurityEventLevel::Error => Color::Red,
+                mdx_core::SecurityEventLevel::Warning => Color::Yellow,
+                mdx_core::SecurityEventLevel::Info => Color::Cyan,
+            };
+            let text = format!("[{}] {}", w.source, w.message);
+            ListItem::new(text).style(Style::default().fg(color))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                .title(" Security Warnings (W to toggle) ")
+        )
+        .style(theme.base);
+
+    frame.render_widget(list, area);
 }
 
 fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, pane_id: usize) {
@@ -2031,13 +2077,13 @@ mod security_tests {
         writeln!(doc_file, "![alt]({})", file.path().display()).unwrap();
         doc_file.flush().unwrap();
 
-        let doc = Document::load(doc_file.path()).unwrap();
+        let (doc, _warnings) = Document::load(doc_file.path()).unwrap();
         let mut config = Config::default();
         config.images.enabled = true;
         config.images.allow_absolute = true;
         config.images.max_bytes = 1;
 
-        let app = App::new(config, doc);
+        let app = App::new(config, doc, vec![]);
         let image = app.doc.images.first().unwrap();
         let result = super::try_load_image(&app, image, ratatui::layout::Rect::default())
             .unwrap();

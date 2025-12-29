@@ -14,20 +14,35 @@ struct Args {
     /// Path to markdown file
     #[arg(value_name = "FILE")]
     file: PathBuf,
+
+    /// Disable security restrictions (use for trusted content only)
+    #[arg(long)]
+    insecure: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
     // Load configuration
-    let config = Config::load().context("Failed to load configuration")?;
+    let (mut config, mut warnings) = Config::load().context("Failed to load configuration")?;
+
+    // Override security settings if --insecure flag is set
+    if args.insecure {
+        config.security.safe_mode = false;
+        config.security.no_exec = false;
+        // Clear security warnings when using --insecure
+        warnings.clear();
+    }
 
     // Load document
-    let doc = Document::load(&args.file)
+    let (doc, doc_warnings) = Document::load(&args.file)
         .with_context(|| format!("Failed to load document: {}", args.file.display()))?;
 
-    // Create app
-    let app = App::new(config, doc);
+    // Combine warnings from config and document
+    warnings.extend(doc_warnings);
+
+    // Create app with warnings
+    let app = App::new(config, doc, warnings);
 
     // Run TUI
     mdx_tui::run(app).context("TUI application error")?;

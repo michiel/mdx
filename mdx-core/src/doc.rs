@@ -6,7 +6,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::security::SecurityEvent;
 use crate::toc;
+
+/// Maximum file size that can be loaded (10MB)
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Maximum number of headings allowed in a document
+const MAX_HEADINGS: usize = 1000;
+
+/// Maximum number of images allowed in a document
+const MAX_IMAGES: usize = 100;
 
 #[cfg(feature = "git")]
 use crate::diff::DiffGutter;
@@ -24,7 +34,7 @@ pub struct Heading {
 }
 
 /// The main document structure
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Document {
     pub path: PathBuf,
     pub rope: Rope,
@@ -41,10 +51,33 @@ pub struct Document {
 
 impl Document {
     /// Load a document from a file path
-    pub fn load(path: &Path) -> Result<Self> {
+    /// Returns (Document, Vec<SecurityEvent>) where events track security warnings
+    pub fn load(path: &Path) -> Result<(Self, Vec<SecurityEvent>)> {
+        let mut warnings = Vec::new();
+
         // Canonicalize the path to get absolute path (needed for git integration)
         let abs_path = path.canonicalize()
             .with_context(|| format!("Failed to canonicalize path: {}", path.display()))?;
+
+        // Check file size before reading
+        let metadata = fs::metadata(&abs_path)
+            .with_context(|| format!("Failed to read file metadata: {}", abs_path.display()))?;
+
+        let file_size = metadata.len();
+        if file_size > MAX_FILE_SIZE {
+            anyhow::bail!(
+                "File exceeds maximum size of 10MB ({} bytes)",
+                file_size
+            );
+        }
+
+        // Warn if approaching size limit (>80%)
+        if file_size > MAX_FILE_SIZE * 8 / 10 {
+            warnings.push(SecurityEvent::warning(
+                format!("Large file: {} bytes", file_size),
+                "document"
+            ));
+        }
 
         let content = fs::read_to_string(&abs_path)
             .with_context(|| format!("Failed to read file: {}", abs_path.display()))?;
@@ -52,8 +85,24 @@ impl Document {
         let rope = Rope::from_str(&content);
         let headings = toc::extract_headings(&rope);
 
-        let metadata = fs::metadata(&abs_path).ok();
-        let mtime = metadata.and_then(|m| m.modified().ok());
+        // Check heading count limit
+        if headings.len() > MAX_HEADINGS {
+            anyhow::bail!(
+                "Document has too many headings ({}, max is {})",
+                headings.len(),
+                MAX_HEADINGS
+            );
+        }
+
+        // Warn if approaching heading limit (>80%)
+        if headings.len() > MAX_HEADINGS * 8 / 10 {
+            warnings.push(SecurityEvent::warning(
+                format!("Many headings: {}", headings.len()),
+                "document"
+            ));
+        }
+
+        let mtime = metadata.modified().ok();
 
         // Initialize with empty diff gutter - will be computed asynchronously by worker thread
         #[cfg(feature = "git")]
@@ -66,7 +115,26 @@ impl Document {
         #[cfg(feature = "images")]
         let images = extract_images(&rope);
 
-        Ok(Self {
+        // Check image count limit
+        #[cfg(feature = "images")]
+        if images.len() > MAX_IMAGES {
+            anyhow::bail!(
+                "Document has too many images ({}, max is {})",
+                images.len(),
+                MAX_IMAGES
+            );
+        }
+
+        // Warn if approaching image limit (>80%)
+        #[cfg(feature = "images")]
+        if images.len() > MAX_IMAGES * 8 / 10 {
+            warnings.push(SecurityEvent::warning(
+                format!("Many images: {}", images.len()),
+                "document"
+            ));
+        }
+
+        let doc = Self {
             path: abs_path,
             rope,
             headings,
@@ -78,7 +146,9 @@ impl Document {
             diff_gutter,
             #[cfg(feature = "images")]
             images,
-        })
+        };
+
+        Ok((doc, warnings))
     }
 
     /// Reload the document from disk
@@ -218,7 +288,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.line_count(), 1); // Empty file has 1 line in Rope
         assert_eq!(doc.headings.len(), 0);
         assert_eq!(doc.rev, 1);
@@ -231,7 +301,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"# Heading\n\nSome text\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.line_count(), 4);
         assert_eq!(doc.headings.len(), 1);
         assert_eq!(doc.headings[0].level, 1);
@@ -246,7 +316,7 @@ mod tests {
         file.write_all(b"Initial content\n")?;
         file.flush()?;
 
-        let mut doc = Document::load(file.path())?;
+        let (mut doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.rev, 1);
 
         // Modify file
@@ -264,7 +334,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"Line 1\nLine 2\nLine 3\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.get_lines(0, 0), "Line 1");
         assert_eq!(doc.get_lines(1, 1), "Line 2");
 
@@ -276,7 +346,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"Line 1\nLine 2\nLine 3\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.get_lines(0, 2), "Line 1\nLine 2\nLine 3");
         assert_eq!(doc.get_lines(1, 2), "Line 2\nLine 3");
 
@@ -288,7 +358,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"Line 1\nLine 2\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         // Should clamp to valid range
         let result = doc.get_lines(0, 100);
         assert!(result.contains("Line 1"));
@@ -303,7 +373,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"# Heading\n\n![alt text](image.png)\n\nSome text\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 1);
         assert_eq!(doc.images[0].src, "image.png");
         assert_eq!(doc.images[0].alt, "alt text");
@@ -319,7 +389,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"![alt text](image.png \"Image Title\")\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 1);
         assert_eq!(doc.images[0].src, "image.png");
         assert_eq!(doc.images[0].alt, "alt text");
@@ -334,7 +404,7 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         file.write_all(b"![](image.png)\n")?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 1);
         assert_eq!(doc.images[0].src, "image.png");
         assert_eq!(doc.images[0].alt, "");
@@ -350,7 +420,7 @@ mod tests {
             b"Line 1\nLine 2\n![first](a.png)\nLine 4\nLine 5\n![second](b.png)\nLine 7\n",
         )?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 2);
         assert_eq!(doc.images[0].source_line, 2);
         assert_eq!(doc.images[1].source_line, 5);
@@ -366,7 +436,7 @@ mod tests {
             b"# Document\n\n![first](a.png)\n\nSome text\n\n![second](b.png)\n\n![third](c.png)\n",
         )?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 3);
         assert_eq!(doc.images[0].src, "a.png");
         assert_eq!(doc.images[0].alt, "first");
@@ -386,7 +456,7 @@ mod tests {
             b"![real image](real.png)\n\n```markdown\n![fake image](fake.png)\n```\n\n![another real](real2.png)\n",
         )?;
 
-        let doc = Document::load(file.path())?;
+        let (doc, _warnings) = Document::load(file.path())?;
         // Code block images should be ignored by pulldown_cmark
         assert_eq!(doc.images.len(), 2);
         assert_eq!(doc.images[0].src, "real.png");
@@ -402,7 +472,7 @@ mod tests {
         file.write_all(b"![initial](initial.png)\n")?;
         file.flush()?;
 
-        let mut doc = Document::load(file.path())?;
+        let (mut doc, _warnings) = Document::load(file.path())?;
         assert_eq!(doc.images.len(), 1);
         assert_eq!(doc.images[0].src, "initial.png");
 
@@ -415,5 +485,22 @@ mod tests {
         assert_eq!(doc.images[1].src, "another.png");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_document_size_limit() {
+        use std::io::Write;
+        let mut file = NamedTempFile::new().unwrap();
+
+        // Create a file larger than MAX_FILE_SIZE (10MB)
+        let large_content = "x".repeat(11 * 1024 * 1024); // 11MB
+        file.write_all(large_content.as_bytes()).unwrap();
+        file.flush().unwrap();
+
+        // Attempt to load should fail
+        let result = Document::load(file.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum size"));
     }
 }

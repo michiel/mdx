@@ -65,6 +65,11 @@ impl ImageNode {
             return None;
         }
 
+        // Reject path traversal attempts before canonicalization
+        if self.src.contains("..") {
+            return None;
+        }
+
         let src_path = Path::new(&self.src);
         if src_path.is_absolute() {
             if allow_absolute {

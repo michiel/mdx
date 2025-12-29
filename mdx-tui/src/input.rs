@@ -668,6 +668,19 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
+    // W - toggle security warnings pane
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('W'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.toggle_security_warnings();
+        return Ok(Action::Continue);
+    }
+
     // M - toggle theme
     if matches!(
         key,

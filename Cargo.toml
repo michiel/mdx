@@ -20,7 +20,7 @@ pulldown-cmark = "0.13"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
+toml = "0.8"
 
 # Error handling
 anyhow = "1.0"

@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::security::SecurityEvent;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -121,8 +123,8 @@ impl Default for EditorConfig {
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
-            safe_mode: false,
-            no_exec: false,
+            safe_mode: true,
+            no_exec: true,
         }
     }
 }
@@ -163,26 +165,53 @@ impl Config {
     /// Get the platform-specific config file path
     pub fn config_path() -> Option<PathBuf> {
         directories::ProjectDirs::from("", "", "mdx")
-            .map(|proj_dirs| proj_dirs.config_dir().join("mdx.yaml"))
+            .map(|proj_dirs| proj_dirs.config_dir().join("mdx.toml"))
     }
 
     /// Load configuration from file, falling back to defaults if missing
-    pub fn load() -> Result<Self> {
+    /// Returns (Config, Vec<SecurityEvent>) where events track security-related settings
+    pub fn load() -> Result<(Self, Vec<SecurityEvent>)> {
+        let mut warnings = Vec::new();
         let config_path = Self::config_path();
 
         if let Some(path) = config_path {
             if path.exists() {
+                // Check config file permissions (Unix only)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let metadata = std::fs::metadata(&path)?;
+                    let perms = metadata.permissions();
+                    if perms.mode() & 0o002 != 0 {
+                        anyhow::bail!(
+                            "Config file {} is world-writable (insecure permissions)",
+                            path.display()
+                        );
+                    }
+                }
+
                 let content = std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-                let mut config: Config = serde_yaml::from_str(&content)
+                let mut config: Config = toml::from_str(&content)
                     .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
 
                 if config.security.safe_mode {
                     config.images.enabled = false;
                 }
 
-                return Ok(config);
+                // Generate informational warnings for security settings
+                if config.security.safe_mode {
+                    warnings.push(SecurityEvent::info("Safe mode enabled", "config"));
+                }
+                if config.security.no_exec {
+                    warnings.push(SecurityEvent::info(
+                        "External editor execution disabled",
+                        "config"
+                    ));
+                }
+
+                return Ok((config, warnings));
             }
         }
 
@@ -191,15 +220,41 @@ impl Config {
         if config.security.safe_mode {
             config.images.enabled = false;
         }
-        Ok(config)
+
+        // Generate warnings for default security settings
+        if config.security.safe_mode {
+            warnings.push(SecurityEvent::info("Safe mode enabled (default)", "config"));
+        }
+        if config.security.no_exec {
+            warnings.push(SecurityEvent::info(
+                "External editor execution disabled (default)",
+                "config"
+            ));
+        }
+
+        Ok((config, warnings))
     }
 
     /// Load from a specific path (for testing)
     pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        // Check config file permissions (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(path)?;
+            let perms = metadata.permissions();
+            if perms.mode() & 0o002 != 0 {
+                anyhow::bail!(
+                    "Config file {} is world-writable (insecure permissions)",
+                    path.display()
+                );
+            }
+        }
+
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        let mut config: Config = serde_yaml::from_str(&content)
+        let mut config: Config = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))
             ?;
 
@@ -230,8 +285,8 @@ mod tests {
     #[test]
     fn security_defaults() {
         let config = Config::default();
-        assert!(!config.security.safe_mode);
-        assert!(!config.security.no_exec);
+        assert!(config.security.safe_mode);
+        assert!(config.security.no_exec);
         if cfg!(feature = "images") {
             assert!(!config.images.enabled);
             assert!(!config.images.allow_absolute);
@@ -243,34 +298,42 @@ mod tests {
     #[test]
     fn test_load_missing_config() -> Result<()> {
         // Loading should return defaults when file doesn't exist
-        let config = Config::load()?;
+        let (config, warnings) = Config::load()?;
         assert_eq!(config.theme, ThemeVariant::Dark);
+        // Should have warnings for default security settings
+        assert!(!warnings.is_empty());
         Ok(())
     }
 
     #[test]
-    fn test_load_valid_yaml() -> Result<()> {
+    fn test_load_valid_toml() -> Result<()> {
         let mut file = NamedTempFile::new()?;
-        let mut yaml_content = String::from(
-            "theme: Light\n\
-toc:\n  enabled: false\n  side: Right\n  width: 40\n\
-editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
+        let mut toml_content = String::from(
+            "theme = \"Light\"\n\
+\n\
+[toc]\n\
+enabled = false\n\
+side = \"Right\"\n\
+width = 40\n\
+\n\
+[editor]\n\
+command = \"nvim\"\n\
+args = [\"+{line}\", \"{file}\"]\n"
         );
 
         if cfg!(feature = "watch") {
-            yaml_content.push_str("watch:\n  enabled: true\n  auto_reload: false\n");
+            toml_content.push_str("\n[watch]\nenabled = true\nauto_reload = false\n");
         }
 
         if cfg!(feature = "git") {
-            yaml_content.push_str("git:\n  diff: true\n  base: Head\n");
+            toml_content.push_str("\n[git]\ndiff = true\nbase = \"Head\"\n");
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: false\n  max_bytes: 2048\n");
+            toml_content.push_str("\n[images]\nenabled = true\nallow_absolute = true\nallow_remote = false\nmax_bytes = 2048\n");
         }
 
-        let yaml_content = yaml_content;
-        file.write_all(yaml_content.as_bytes())?;
+        file.write_all(toml_content.as_bytes())?;
 
         let config = Config::load_from(file.path())?;
         assert_eq!(config.theme, ThemeVariant::Light);
@@ -286,27 +349,34 @@ editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
     }
 
     #[test]
-    fn test_load_partial_yaml() -> Result<()> {
+    fn test_load_partial_toml() -> Result<()> {
         let mut file = NamedTempFile::new()?;
-        let mut yaml_content = String::from(
-            "theme: Light\n\
-toc:\n  enabled: true\n  side: Left\n  width: 32\n\
-editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
+        let mut toml_content = String::from(
+            "theme = \"Light\"\n\
+\n\
+[toc]\n\
+enabled = true\n\
+side = \"Left\"\n\
+width = 32\n\
+\n\
+[editor]\n\
+command = \"$EDITOR\"\n\
+args = [\"+{line}\", \"{file}\"]\n"
         );
 
         if cfg!(feature = "watch") {
-            yaml_content.push_str("watch:\n  enabled: true\n  auto_reload: false\n");
+            toml_content.push_str("\n[watch]\nenabled = true\nauto_reload = false\n");
         }
 
         if cfg!(feature = "git") {
-            yaml_content.push_str("git:\n  diff: true\n  base: Head\n");
+            toml_content.push_str("\n[git]\ndiff = true\nbase = \"Head\"\n");
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: false\n  max_bytes: 2048\n");
+            toml_content.push_str("\n[images]\nenabled = true\nallow_absolute = true\nallow_remote = false\nmax_bytes = 2048\n");
         }
 
-        file.write_all(yaml_content.as_bytes())?;
+        file.write_all(toml_content.as_bytes())?;
 
         let config = Config::load_from(file.path())?;
         assert_eq!(config.theme, ThemeVariant::Light);
@@ -321,13 +391,28 @@ editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
     #[test]
     fn security_safe_mode_disables_images() -> Result<()> {
         let mut file = NamedTempFile::new()?;
-        let yaml_content = "theme: Dark\n\
-security:\n  safe_mode: true\n  no_exec: false\n\
-toc:\n  enabled: false\n  side: Left\n  width: 32\n\
-editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n\
-images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: true\n  max_bytes: 2048\n";
+        let toml_content = "theme = \"Dark\"\n\
+\n\
+[security]\n\
+safe_mode = true\n\
+no_exec = false\n\
+\n\
+[toc]\n\
+enabled = false\n\
+side = \"Left\"\n\
+width = 32\n\
+\n\
+[editor]\n\
+command = \"$EDITOR\"\n\
+args = [\"+{line}\", \"{file}\"]\n\
+\n\
+[images]\n\
+enabled = true\n\
+allow_absolute = true\n\
+allow_remote = true\n\
+max_bytes = 2048\n";
 
-        file.write_all(yaml_content.as_bytes())?;
+        file.write_all(toml_content.as_bytes())?;
 
         let config = Config::load_from(file.path())?;
         assert!(config.security.safe_mode);
@@ -337,9 +422,9 @@ images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: true\n  max_by
     }
 
     #[test]
-    fn test_load_invalid_yaml_returns_error() {
+    fn test_load_invalid_toml_returns_error() {
         let mut file = NamedTempFile::new().unwrap();
-        file.write_all(b"invalid: yaml: syntax:").unwrap();
+        file.write_all(b"invalid toml [[[syntax").unwrap();
 
         let result = Config::load_from(file.path());
         assert!(result.is_err());
@@ -352,7 +437,7 @@ images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: true\n  max_by
         assert!(path.is_some());
         if let Some(p) = path {
             assert!(p.to_string_lossy().contains("mdx"));
-            assert!(p.to_string_lossy().ends_with("mdx.yaml"));
+            assert!(p.to_string_lossy().ends_with("mdx.toml"));
         }
     }
 
@@ -363,10 +448,10 @@ images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: true\n  max_by
             ..Default::default()
         };
 
-        let yaml = serde_yaml::to_string(&config)?;
-        assert!(yaml.contains("Light"));
+        let toml_str = toml::to_string(&config)?;
+        assert!(toml_str.contains("Light"));
 
-        let parsed: Config = serde_yaml::from_str(&yaml)?;
+        let parsed: Config = toml::from_str(&toml_str)?;
         assert_eq!(parsed.theme, ThemeVariant::Light);
 
         Ok(())

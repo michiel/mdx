@@ -9,6 +9,7 @@
 
 pub mod config;
 pub mod doc;
+pub mod security;
 pub mod selection;
 pub mod toc;
 
@@ -23,4 +24,5 @@ pub mod image;
 // Re-export commonly used types
 pub use config::Config;
 pub use doc::Document;
+pub use security::{SecurityEvent, SecurityEventLevel};
 pub use selection::LineSelection;

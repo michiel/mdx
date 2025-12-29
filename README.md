@@ -163,73 +163,73 @@ The application uses `$EDITOR` by default for external editing. Configure a cust
 
 ## Configuration
 
-Configuration is read from a YAML file in the platform-specific config directory:
+Configuration is read from a TOML file in the platform-specific config directory:
 
-- **Linux**: `~/.config/mdx/mdx.yaml` (or `$XDG_CONFIG_HOME/mdx/mdx.yaml`)
-- **macOS**: `~/Library/Application Support/mdx/mdx.yaml`
-- **Windows**: `%APPDATA%\mdx\mdx.yaml`
+- **Linux**: `~/.config/mdx/mdx.toml` (or `$XDG_CONFIG_HOME/mdx/mdx.toml`)
+- **macOS**: `~/Library/Application Support/mdx/mdx.toml`
+- **Windows**: `%APPDATA%\mdx\mdx.toml`
 
 ### Example Configuration
 
-```yaml
+```toml
 # Theme selection
-theme: dark            # Options: dark, light
+theme = "dark"  # Options: "dark", "light"
 
 # Table of contents settings
-toc:
-  enabled: true        # Show TOC on startup
-  side: left           # Options: left, right
-  width: 32            # Width in columns
+[toc]
+enabled = true   # Show TOC on startup
+side = "left"    # Options: "left", "right"
+width = 32       # Width in columns
 
 # External editor configuration
-editor:
-  command: "$EDITOR"   # Use $EDITOR environment variable
-  args: ["+{line}", "{file}"]  # {line} and {file} are replaced at runtime
+[editor]
+command = "$EDITOR"  # Use $EDITOR environment variable
+args = ["+{line}", "{file}"]  # {line} and {file} are replaced at runtime
 
-# Security options
-security:
-  safe_mode: false     # Sanitise terminal output, disable external commands, and turn off images
-  no_exec: false       # Disable external editor execution
+# Security options (secure defaults)
+[security]
+safe_mode = true   # Sanitise terminal output, disable external commands, and turn off images
+no_exec = true     # Disable external editor execution (use --insecure to override)
 
 # File watching settings
-watch:
-  enabled: true        # Watch files for changes
-  auto_reload: false   # Automatically reload on change (false = show indicator only)
+[watch]
+enabled = true      # Watch files for changes
+auto_reload = false # Automatically reload on change (false = show indicator only)
 
 # Git integration settings
-git:
-  diff: true           # Show git diff gutter
-  base: head           # Options: head, index (compare against HEAD or staging area)
+[git]
+diff = true       # Show git diff gutter
+base = "head"     # Options: "head", "index" (compare against HEAD or staging area)
 
 # Image rendering settings
-images:
-  enabled: false
-  allow_absolute: false
-  allow_remote: false
-  max_bytes: 10485760
+[images]
+enabled = false
+allow_absolute = false
+allow_remote = false
+max_bytes = 10485760
 ```
 
 ### Editor Configuration Examples
 
 **Neovim/Vim**:
-```yaml
-editor:
-  command: "nvim"
-  args: ["+{line}", "{file}"]
+```toml
+[editor]
+command = "nvim"
+args = ["+{line}", "{file}"]
 ```
 
 **VSCode**:
-```yaml
-editor:
-  command: "code"
-  args: ["--goto", "{file}:{line}"]
+```toml
+[editor]
+command = "code"
+args = ["--goto", "{file}:{line}"]
 ```
 
 **Emacs**:
-```yaml
-editor:
-  command: "emacs"
-  args: ["+{line}", "{file}"]
+```toml
+[editor]
+command = "emacs"
+args = ["+{line}", "{file}"]
 ```
 
 ## Development

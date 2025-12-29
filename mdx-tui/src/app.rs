@@ -62,6 +62,8 @@ pub struct App {
     pub search_matches: Vec<usize>,
     pub search_current_match: Option<usize>,
     pub show_help: bool,
+    pub security_warnings: Vec<mdx_core::SecurityEvent>,
+    pub show_security_warnings: bool,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -69,8 +71,8 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new application instance with a document
-    pub fn new(config: Config, doc: Document) -> Self {
+    /// Create a new application instance with a document and security warnings
+    pub fn new(config: Config, doc: Document, warnings: Vec<mdx_core::SecurityEvent>) -> Self {
         let mut config = config;
         if config.security.safe_mode {
             config.images.enabled = false;
@@ -80,6 +82,7 @@ impl App {
         let theme_variant = config.theme;
         let theme = Theme::for_variant(theme_variant);
         let panes = PaneManager::new(0); // Single pane for single document
+        let show_security_warnings = !warnings.is_empty();
 
         #[cfg(feature = "watch")]
         let watcher = if config.watch.enabled {
@@ -123,6 +126,8 @@ impl App {
             search_matches: Vec::new(),
             search_current_match: None,
             show_help: false,
+            security_warnings: warnings,
+            show_security_warnings,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
@@ -133,6 +138,17 @@ impl App {
     /// Toggle help dialog
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    /// Toggle security warnings pane
+    pub fn toggle_security_warnings(&mut self) {
+        self.show_security_warnings = !self.show_security_warnings;
+    }
+
+    /// Add a security warning event
+    pub fn add_security_warning(&mut self, event: mdx_core::SecurityEvent) {
+        self.security_warnings.push(event);
+        self.show_security_warnings = true;
     }
 
     /// Handle quit request
@@ -482,7 +498,7 @@ impl App {
         // Priority: new > modified > deleted
         if has_added && !has_modified && !has_deleted {
             Some("new")
-        } else if has_modified || (has_added && has_modified) {
+        } else if has_modified {
             Some("modified")
         } else if has_deleted {
             Some("deleted")
@@ -560,8 +576,12 @@ impl App {
     pub fn open_in_editor(&self) -> anyhow::Result<()> {
         use crate::editor;
 
-        if self.config.security.no_exec || self.config.security.safe_mode {
-            anyhow::bail!("External commands are disabled by configuration");
+        if self.config.security.no_exec {
+            anyhow::bail!("External editor execution is disabled (security.no_exec = true)");
+        }
+
+        if self.config.security.safe_mode {
+            anyhow::bail!("External commands are disabled (security.safe_mode = true)");
         }
 
         let pane = self.panes.focused_pane()
@@ -700,14 +720,15 @@ mod tests {
             write!(file, "Line {}", i + 1).unwrap();
         }
         file.flush().unwrap();
-        Document::load(file.path()).unwrap()
+        let (doc, _warnings) = Document::load(file.path()).unwrap();
+        doc
     }
 
     #[test]
     fn test_move_cursor_down() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
         app.move_cursor_down(1);
@@ -720,7 +741,7 @@ mod tests {
     fn test_move_cursor_down_bounded() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Try to move beyond last line
         app.move_cursor_down(100);
@@ -731,7 +752,7 @@ mod tests {
     fn test_move_cursor_up() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
         app.move_cursor_up(1);
@@ -744,7 +765,7 @@ mod tests {
     fn test_move_cursor_up_bounded() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 2;
         // Try to move before first line
@@ -756,7 +777,7 @@ mod tests {
     fn test_jump_to_line() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         app.jump_to_line(5);
         assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 5);
@@ -776,7 +797,7 @@ mod tests {
     fn test_scroll_half_page() {
         let config = Config::default();
         let doc = create_test_doc(50);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         let viewport_height = 20;
         let viewport_width = 80;
@@ -794,7 +815,7 @@ mod tests {
     fn test_auto_scroll_down() {
         let config = Config::default();
         let doc = create_test_doc(50);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
         let viewport_height = 10;
 
         // Move cursor to line 15 (beyond viewport of 10 lines)
@@ -809,7 +830,7 @@ mod tests {
     fn test_auto_scroll_up() {
         let config = Config::default();
         let doc = create_test_doc(50);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
         let viewport_height = 10;
 
         // Start scrolled down
@@ -826,7 +847,7 @@ mod tests {
     fn test_navigation_with_empty_doc() {
         let config = Config::default();
         let doc = create_test_doc(0);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Should handle empty doc gracefully
         app.move_cursor_down(1);
@@ -840,7 +861,7 @@ mod tests {
     fn test_navigation_with_single_line() {
         let config = Config::default();
         let doc = create_test_doc(1);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         app.move_cursor_down(1);
         assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0); // Can't move beyond line 0
@@ -853,7 +874,7 @@ mod tests {
     fn test_toggle_toc() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Initially hidden (from config default)
         assert!(!app.show_toc);
@@ -880,8 +901,8 @@ mod tests {
         )
         .unwrap();
         file.flush().unwrap();
-        let doc = Document::load(file.path()).unwrap();
-        let mut app = App::new(config, doc);
+        let (doc, _warnings) = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc, vec![]);
 
         assert_eq!(app.toc_selected, 0);
 
@@ -920,8 +941,8 @@ mod tests {
         )
         .unwrap();
         file.flush().unwrap();
-        let doc = Document::load(file.path()).unwrap();
-        let mut app = App::new(config, doc);
+        let (doc, _warnings) = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc, vec![]);
 
         // Jump to second heading
         app.toc_selected = 1;
@@ -944,8 +965,8 @@ mod tests {
         )
         .unwrap();
         file.flush().unwrap();
-        let doc = Document::load(file.path()).unwrap();
-        let mut app = App::new(config, doc);
+        let (doc, _warnings) = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc, vec![]);
 
         // At line 0 - should be heading 0
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 0;
@@ -968,7 +989,7 @@ mod tests {
     fn test_enter_visual_line_mode() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Move to line 3
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 3;
@@ -989,7 +1010,7 @@ mod tests {
     fn test_visual_line_selection_navigation() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Start at line 3
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 3;
@@ -1011,7 +1032,7 @@ mod tests {
     fn test_visual_line_selection_backward() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         // Start at line 5
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 5;
@@ -1033,7 +1054,7 @@ mod tests {
     fn test_exit_visual_line_mode() {
         let config = Config::default();
         let doc = create_test_doc(10);
-        let mut app = App::new(config, doc);
+        let mut app = App::new(config, doc, vec![]);
 
         app.enter_visual_line_mode();
         assert_eq!(app.panes.focused_pane().unwrap().view.mode, Mode::VisualLine);
@@ -1051,8 +1072,8 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "Line 1\nLine 2\nLine 3\nLine 4\nLine 5").unwrap();
         file.flush().unwrap();
-        let doc = Document::load(file.path()).unwrap();
-        let mut app = App::new(config, doc);
+        let (doc, _warnings) = Document::load(file.path()).unwrap();
+        let mut app = App::new(config, doc, vec![]);
 
         // Select lines 1-3 (0-indexed)
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 1;
@@ -1076,7 +1097,7 @@ mod tests {
         let mut config = Config::default();
         config.security.no_exec = true;
         let doc = create_test_doc(1);
-        let app = App::new(config, doc);
+        let app = App::new(config, doc, vec![]);
 
         let result = app.open_in_editor();
         assert!(result.is_err());
@@ -1087,7 +1108,7 @@ mod tests {
         let mut config = Config::default();
         config.security.safe_mode = true;
         let doc = create_test_doc(1);
-        let app = App::new(config, doc);
+        let app = App::new(config, doc, vec![]);
 
         let result = app.open_in_editor();
         assert!(result.is_err());
