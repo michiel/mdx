@@ -1717,10 +1717,10 @@ fn render_toc_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(popup, popup_area);
 }
 
-/// Render image (actual image or placeholder)
+/// Render image (metadata placeholder)
 #[cfg(feature = "images")]
 fn render_image(
-    app: &mut App,
+    app: &App,
     content_area: ratatui::layout::Rect,
     source_line: usize,
     image: &mdx_core::image::ImageNode,
@@ -1730,16 +1730,16 @@ fn render_image(
     selection_range: Option<(usize, usize)>,
     left_margin_width: u16,
 ) -> (Vec<Line<'static>>, usize) {
-    // Try to resolve and load the image
-    let image_result = try_load_image(app, image, content_area);
+    // Try to read image metadata
+    let metadata_result = try_load_image(app, image, content_area);
 
-    match image_result {
-        Ok(Some(decoded)) => {
-            // Successfully loaded - show placeholder with image info
+    match metadata_result {
+        Ok(Some(metadata)) => {
+            // Successfully read - show placeholder with image info
             render_image_info_placeholder(
                 app,
                 image,
-                &decoded,
+                &metadata,
                 source_line,
                 line_num_width,
                 is_focused,
@@ -1749,7 +1749,7 @@ fn render_image(
             )
         }
         _ => {
-            // Failed to load - show placeholder
+            // Failed to read - show placeholder
             render_image_placeholder(
                 app,
                 content_area,
@@ -1765,13 +1765,13 @@ fn render_image(
     }
 }
 
-/// Try to load an image from cache or disk/URL
+/// Try to read image metadata
 #[cfg(feature = "images")]
 fn try_load_image(
-    app: &mut App,
+    app: &App,
     image: &mdx_core::image::ImageNode,
-    content_area: ratatui::layout::Rect,
-) -> anyhow::Result<Option<crate::image_cache::DecodedImage>> {
+    _content_area: ratatui::layout::Rect,
+) -> anyhow::Result<Option<crate::image_cache::ImageMetadata>> {
     use mdx_core::image::ImageSource;
 
     // Resolve image source
@@ -1782,26 +1782,18 @@ fn try_load_image(
         None => return Ok(None),
     };
 
-    // Calculate max dimensions based on terminal size
-    let content_width = content_area.width.saturating_sub(2) as u32;
-    let content_height = content_area.height.saturating_sub(2) as u32;
-    let max_width = (content_width * app.config.images.max_width_percent as u32) / 100;
-    let max_height = (content_height * app.config.images.max_height_percent as u32) / 100;
-
-    // Load from cache based on source type
-    let decoded = match source {
+    // Read metadata based on source type
+    let metadata = match source {
         ImageSource::Local(path) => {
-            app.image_cache.get_or_decode(&path, max_width, max_height)?
+            crate::image_cache::ImageMetadata::from_path(&path)?
         }
-        ImageSource::Remote(url) => {
-            if !app.config.images.allow_remote {
-                return Ok(None);
-            }
-            app.image_cache.get_or_fetch(&url, max_width, max_height)?
+        ImageSource::Remote(_url) => {
+            // Don't fetch remote images
+            return Ok(None);
         }
     };
 
-    Ok(Some(decoded))
+    Ok(Some(metadata))
 }
 
 /// Render placeholder with image information
@@ -1809,7 +1801,7 @@ fn try_load_image(
 fn render_image_info_placeholder(
     app: &App,
     image: &mdx_core::image::ImageNode,
-    decoded: &crate::image_cache::DecodedImage,
+    metadata: &crate::image_cache::ImageMetadata,
     source_line: usize,
     line_num_width: usize,
     is_focused: bool,
@@ -1829,8 +1821,8 @@ fn render_image_info_placeholder(
     let info_text = format!(
         "🖼  {} | {}x{}",
         alt_text,
-        decoded.width,
-        decoded.height
+        metadata.width,
+        metadata.height
     );
 
     // Check if this line is selected
@@ -1902,141 +1894,86 @@ fn render_image_info_placeholder(
 #[cfg(feature = "images")]
 fn render_image_placeholder(
     app: &App,
-    content_area: ratatui::layout::Rect,
+    _content_area: ratatui::layout::Rect,
     source_line: usize,
     image: &mdx_core::image::ImageNode,
     line_num_width: usize,
     is_focused: bool,
     cursor: usize,
     selection_range: Option<(usize, usize)>,
-    left_margin_width: u16,
+    _left_margin_width: u16,
 ) -> (Vec<Line<'static>>, usize) {
-    let mut rendered: Vec<Line> = Vec::new();
+    let mut lines = Vec::new();
 
-    // Calculate placeholder height based on config
-    // Default to 10 lines, but respect configured percentages
-    let content_height = content_area.height.saturating_sub(2) as usize;
-    let content_width = content_area.width.saturating_sub(2) as usize;
-    let max_height_from_config = (content_height * app.config.images.max_height_percent as usize) / 100;
-    let max_width_from_config = (content_width * app.config.images.max_width_percent as usize) / 100;
-
-    // Assume a 2:1 width-to-height ratio for terminal cells (cells are typically taller than wide)
-    // So if we have width W available, we can show height H = W/2
-    let max_height_from_width = max_width_from_config / 2;
-
-    // Take minimum of both constraints
-    let placeholder_height = max_height_from_config.min(max_height_from_width).max(3).min(20);
-
-    // Create placeholder text
     let alt_text = if image.alt.is_empty() {
         "Image"
     } else {
         &image.alt
     };
-    let placeholder_text = format!("[Image: {}]", alt_text);
 
-    // Render lines
-    for offset in 0..placeholder_height {
-        let mut line_spans: Vec<Span> = Vec::new();
+    // Format error message
+    let info_text = format!("🖼  {} | [unable to read]", alt_text);
 
-        // Only show line number and gutter on first line
-        if offset == 0 {
-            let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
-            let line_num_color = if is_focused && source_line == cursor {
-                Color::White
-            } else {
-                Color::DarkGray
-            };
-            line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+    // Check if this line is selected
+    let is_selected = if let Some((start, end)) = selection_range {
+        source_line >= start && source_line <= end
+    } else {
+        false
+    };
 
-            #[cfg(feature = "git")]
-            if app.config.git.diff {
-                use mdx_core::diff::DiffMark;
-                let gutter = match app.doc.diff_gutter.get(source_line) {
-                    DiffMark::None => "  ",
-                    DiffMark::Added => "│ ",
-                    DiffMark::Modified => "│ ",
-                    DiffMark::DeletedAfter(_) => "│ ",
-                };
-                let gutter_color = match app.doc.diff_gutter.get(source_line) {
-                    DiffMark::None => Color::DarkGray,
-                    DiffMark::Added => Color::Green,
-                    DiffMark::Modified => Color::Yellow,
-                    DiffMark::DeletedAfter(_) => Color::Red,
-                };
-                line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
-            } else {
-                line_spans.push(Span::raw("  "));
-            }
-            #[cfg(not(feature = "git"))]
-            line_spans.push(Span::raw("  "));
-        } else {
-            // Continuation lines - just indent
-            line_spans.push(Span::raw(" ".repeat(left_margin_width as usize)));
-        }
+    // Show simple single-line placeholder
+    let mut line_spans: Vec<Span> = Vec::new();
 
-        // Add placeholder content
-        if offset == placeholder_height / 2 {
-            // Center line - show placeholder text
-            let available_width = content_width.saturating_sub(left_margin_width as usize);
-            let text_width = placeholder_text.chars().count();
+    // Line number
+    let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
+    let line_num_color = if is_focused && source_line == cursor {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
+    line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
 
-            if text_width < available_width {
-                let padding_left = (available_width - text_width) / 2;
-                let padding_right = available_width - text_width - padding_left;
-
-                line_spans.push(Span::styled(
-                    " ".repeat(padding_left),
-                    Style::default().bg(Color::Rgb(50, 50, 50))
-                ));
-                line_spans.push(Span::styled(
-                    placeholder_text.clone(),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .bg(Color::Rgb(50, 50, 50))
-                        .add_modifier(Modifier::BOLD)
-                ));
-                line_spans.push(Span::styled(
-                    " ".repeat(padding_right),
-                    Style::default().bg(Color::Rgb(50, 50, 50))
-                ));
-            } else {
-                // Text too long, truncate
-                let truncated = format!("{}…", placeholder_text.chars().take(available_width - 1).collect::<String>());
-                line_spans.push(Span::styled(
-                    truncated,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .bg(Color::Rgb(50, 50, 50))
-                        .add_modifier(Modifier::BOLD)
-                ));
-            }
-        } else {
-            // Empty placeholder line
-            let available_width = content_width.saturating_sub(left_margin_width as usize);
-            line_spans.push(Span::styled(
-                " ".repeat(available_width),
-                Style::default().bg(Color::Rgb(50, 50, 50))
-            ));
-        }
-
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting if this is the cursor or selected line
-        let is_selected = if let Some((start, end)) = selection_range {
-            source_line >= start && source_line <= end
-        } else {
-            false
+    // Git diff gutter
+    #[cfg(feature = "git")]
+    if app.config.git.diff {
+        use mdx_core::diff::DiffMark;
+        let gutter = match app.doc.diff_gutter.get(source_line) {
+            DiffMark::None => "  ",
+            DiffMark::Added => "│ ",
+            DiffMark::Modified => "│ ",
+            DiffMark::DeletedAfter(_) => "│ ",
         };
+        let gutter_color = match app.doc.diff_gutter.get(source_line) {
+            DiffMark::None => Color::DarkGray,
+            DiffMark::Added => Color::Green,
+            DiffMark::Modified => Color::Yellow,
+            DiffMark::DeletedAfter(_) => Color::Red,
+        };
+        line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+    } else {
+        line_spans.push(Span::raw("  "));
+    }
+    #[cfg(not(feature = "git"))]
+    line_spans.push(Span::raw("  "));
 
-        if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
-        } else if is_focused && source_line == cursor {
-            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
-        }
+    // Add error placeholder
+    line_spans.push(Span::styled(
+        info_text,
+        Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD)
+    ));
 
-        rendered.push(line);
+    let mut line = Line::from(line_spans);
+
+    // Apply highlighting if this is the cursor or selected line
+    if is_focused && is_selected {
+        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+    } else if is_focused && source_line == cursor {
+        line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
     }
 
-    (rendered, 1) // Consumed 1 source line
+    lines.push(line);
+
+    (lines, 1)
 }

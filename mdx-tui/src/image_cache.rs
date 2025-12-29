@@ -1,319 +1,28 @@
-//! Image decoding and caching for terminal rendering
+//! Image metadata reading for placeholders
 
-#[cfg(feature = "images")]
-use lru::LruCache;
-#[cfg(feature = "images")]
-use std::num::NonZeroUsize;
 #[cfg(feature = "images")]
 use std::path::Path;
 
 #[cfg(feature = "images")]
-/// Cache key for decoded images
-#[derive(Hash, PartialEq, Eq, Clone, Debug)]
-pub struct ImageCacheKey {
-    /// Blake3 hash of file path/URL + mtime/timestamp
-    pub hash: [u8; 32],
-}
-
-#[cfg(feature = "images")]
-impl ImageCacheKey {
-    /// Create cache key from file path
-    pub fn from_path(path: &Path) -> Option<Self> {
-        use std::fs;
-
-        // Get file metadata for mtime
-        let metadata = fs::metadata(path).ok()?;
-        let mtime = metadata.modified().ok()?;
-
-        // Create hash input: path + mtime
-        let path_str = path.to_string_lossy();
-        let mtime_secs = mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(path_str.as_bytes());
-        hasher.update(&mtime_secs.to_le_bytes());
-
-        let hash = hasher.finalize();
-        Some(Self {
-            hash: *hash.as_bytes(),
-        })
-    }
-
-    /// Create cache key from URL
-    pub fn from_url(url: &str) -> Self {
-        // For URLs, just hash the URL itself
-        // We don't track remote modification times
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(url.as_bytes());
-
-        let hash = hasher.finalize();
-        Self {
-            hash: *hash.as_bytes(),
-        }
-    }
-}
-
-#[cfg(feature = "images")]
-/// Decoded image data ready for terminal rendering
-#[derive(Clone)]
-pub struct DecodedImage {
+/// Image metadata (just dimensions)
+#[derive(Clone, Debug)]
+pub struct ImageMetadata {
     /// Image width in pixels
-    pub width: u32,
+    pub width: usize,
     /// Image height in pixels
-    pub height: u32,
-    /// RGBA pixel data
-    pub data: Vec<u8>,
+    pub height: usize,
 }
 
 #[cfg(feature = "images")]
-impl DecodedImage {
-    /// Decode image from file path with size constraints
-    pub fn from_path(path: &Path, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
-        // Check if file is SVG
-        if let Some(ext) = path.extension() {
-            if ext.eq_ignore_ascii_case("svg") {
-                return Self::from_svg_path(path, max_width, max_height);
-            }
-        }
-
-        // Standard raster image decoding
-        use image::GenericImageView;
-
-        // Load and decode image
-        let img = image::open(path)?;
-        let (orig_width, orig_height) = img.dimensions();
-
-        // Calculate scaled dimensions maintaining aspect ratio
-        let (width, height) = calculate_scaled_dimensions(
-            orig_width,
-            orig_height,
-            max_width,
-            max_height,
-        );
-
-        // Resize if needed
-        let resized = if width != orig_width || height != orig_height {
-            img.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
-        } else {
-            img
-        };
-
-        // Convert to RGBA
-        let rgba = resized.to_rgba8();
-        let data = rgba.into_raw();
+impl ImageMetadata {
+    /// Read image dimensions from file path
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        let size = imagesize::size(path)?;
 
         Ok(Self {
-            width,
-            height,
-            data,
+            width: size.width,
+            height: size.height,
         })
-    }
-
-    /// Decode SVG image from file path with size constraints
-    fn from_svg_path(path: &Path, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
-        use std::fs;
-
-        // Read SVG file
-        let svg_data = fs::read(path)?;
-
-        Self::from_svg_data(&svg_data, max_width, max_height)
-    }
-
-    /// Decode SVG from data bytes
-    fn from_svg_data(svg_data: &[u8], max_width: u32, max_height: u32) -> anyhow::Result<Self> {
-        // Parse SVG
-        let opt = resvg::usvg::Options::default();
-        let tree = resvg::usvg::Tree::from_data(svg_data, &opt)?;
-
-        // Get SVG dimensions
-        let svg_size = tree.size();
-        let orig_width = svg_size.width() as u32;
-        let orig_height = svg_size.height() as u32;
-
-        // Calculate scaled dimensions
-        let (width, height) = calculate_scaled_dimensions(
-            orig_width,
-            orig_height,
-            max_width,
-            max_height,
-        );
-
-        // Create pixmap for rendering
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
-            .ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
-
-        // Render SVG to pixmap
-        let transform = resvg::tiny_skia::Transform::from_scale(
-            width as f32 / orig_width as f32,
-            height as f32 / orig_height as f32,
-        );
-
-        resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-        // Convert to RGBA
-        let data = pixmap.take();
-
-        Ok(Self {
-            width,
-            height,
-            data,
-        })
-    }
-
-    /// Decode image from URL with size constraints
-    pub fn from_url(url: &str, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
-        // Download image data
-        let response = reqwest::blocking::get(url)?;
-
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
-        }
-
-        // Extract content type as owned String to avoid borrow issues
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-
-        let image_data = response.bytes()?;
-
-        // Check if SVG based on content type or URL
-        if content_type.contains("svg") || url.ends_with(".svg") {
-            return Self::from_svg_data(&image_data, max_width, max_height);
-        }
-
-        // Decode as raster image
-        use image::GenericImageView;
-
-        let img = image::load_from_memory(&image_data)?;
-        let (orig_width, orig_height) = img.dimensions();
-
-        // Calculate scaled dimensions
-        let (width, height) = calculate_scaled_dimensions(
-            orig_width,
-            orig_height,
-            max_width,
-            max_height,
-        );
-
-        // Resize if needed
-        let resized = if width != orig_width || height != orig_height {
-            img.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
-        } else {
-            img
-        };
-
-        // Convert to RGBA
-        let rgba = resized.to_rgba8();
-        let data = rgba.into_raw();
-
-        Ok(Self {
-            width,
-            height,
-            data,
-        })
-    }
-}
-
-#[cfg(feature = "images")]
-/// Calculate scaled dimensions maintaining aspect ratio
-fn calculate_scaled_dimensions(
-    orig_width: u32,
-    orig_height: u32,
-    max_width: u32,
-    max_height: u32,
-) -> (u32, u32) {
-    if orig_width <= max_width && orig_height <= max_height {
-        return (orig_width, orig_height);
-    }
-
-    let width_ratio = max_width as f64 / orig_width as f64;
-    let height_ratio = max_height as f64 / orig_height as f64;
-
-    let scale = width_ratio.min(height_ratio);
-
-    let new_width = (orig_width as f64 * scale).round() as u32;
-    let new_height = (orig_height as f64 * scale).round() as u32;
-
-    (new_width.max(1), new_height.max(1))
-}
-
-#[cfg(feature = "images")]
-/// LRU cache for decoded images
-pub struct ImageCache {
-    cache: LruCache<ImageCacheKey, DecodedImage>,
-}
-
-#[cfg(feature = "images")]
-impl ImageCache {
-    /// Create new image cache with capacity
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
-        }
-    }
-
-    /// Get cached image or decode and cache it from file path
-    pub fn get_or_decode(
-        &mut self,
-        path: &Path,
-        max_width: u32,
-        max_height: u32,
-    ) -> anyhow::Result<DecodedImage> {
-        // Generate cache key
-        let key = ImageCacheKey::from_path(path)
-            .ok_or_else(|| anyhow::anyhow!("Failed to generate cache key for {:?}", path))?;
-
-        // Check cache first
-        if let Some(cached) = self.cache.get(&key) {
-            return Ok(cached.clone());
-        }
-
-        // Decode image
-        let decoded = DecodedImage::from_path(path, max_width, max_height)?;
-
-        // Store in cache
-        self.cache.put(key, decoded.clone());
-
-        Ok(decoded)
-    }
-
-    /// Get cached image or fetch and decode from URL
-    pub fn get_or_fetch(
-        &mut self,
-        url: &str,
-        max_width: u32,
-        max_height: u32,
-    ) -> anyhow::Result<DecodedImage> {
-        // Generate cache key from URL
-        let key = ImageCacheKey::from_url(url);
-
-        // Check cache first
-        if let Some(cached) = self.cache.get(&key) {
-            return Ok(cached.clone());
-        }
-
-        // Fetch and decode image
-        let decoded = DecodedImage::from_url(url, max_width, max_height)?;
-
-        // Store in cache
-        self.cache.put(key, decoded.clone());
-
-        Ok(decoded)
-    }
-
-    /// Clear the cache
-    pub fn clear(&mut self) {
-        self.cache.clear();
-    }
-}
-
-#[cfg(feature = "images")]
-impl Default for ImageCache {
-    fn default() -> Self {
-        Self::new(32) // Default to 32 cached images
     }
 }
 
@@ -323,101 +32,38 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn create_test_image() -> NamedTempFile {
-        use image::{ImageBuffer, Rgb};
-        use std::io::Cursor;
-
+    fn create_test_png() -> NamedTempFile {
         let mut file = tempfile::Builder::new()
             .suffix(".png")
             .tempfile()
             .unwrap();
 
-        // Create a simple 100x100 red image
-        let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_fn(100, 100, |_x, _y| {
-            Rgb([255, 0, 0])
-        });
+        // Minimal valid PNG (1x1 red pixel)
+        let png_data = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1 dimensions
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+            0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
+            0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+            0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D,
+            0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
+            0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
 
-        // Encode as PNG
-        let mut png_data = Vec::new();
-        let mut cursor = Cursor::new(&mut png_data);
-        img.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
         file.write_all(&png_data).unwrap();
         file.flush().unwrap();
-
         file
     }
 
     #[test]
-    fn test_cache_key_from_path() {
-        let file = create_test_image();
-        let key = ImageCacheKey::from_path(file.path());
-        assert!(key.is_some());
-    }
+    fn test_read_metadata() {
+        let file = create_test_png();
+        let metadata = ImageMetadata::from_path(file.path());
+        assert!(metadata.is_ok());
 
-    #[test]
-    fn test_decode_image() {
-        let file = create_test_image();
-        let decoded = DecodedImage::from_path(file.path(), 100, 100);
-        assert!(decoded.is_ok());
-
-        let img = decoded.unwrap();
-        assert_eq!(img.width, 100);
-        assert_eq!(img.height, 100);
-        assert_eq!(img.data.len(), 100 * 100 * 4); // RGBA
-    }
-
-    #[test]
-    fn test_decode_with_scaling() {
-        let file = create_test_image();
-        let decoded = DecodedImage::from_path(file.path(), 50, 50);
-        assert!(decoded.is_ok());
-
-        let img = decoded.unwrap();
-        assert_eq!(img.width, 50);
-        assert_eq!(img.height, 50);
-    }
-
-    #[test]
-    fn test_scaled_dimensions() {
-        // No scaling needed
-        assert_eq!(calculate_scaled_dimensions(100, 100, 200, 200), (100, 100));
-
-        // Width constrained
-        assert_eq!(calculate_scaled_dimensions(200, 100, 100, 200), (100, 50));
-
-        // Height constrained
-        assert_eq!(calculate_scaled_dimensions(100, 200, 200, 100), (50, 100));
-
-        // Both constrained, width is limiting
-        assert_eq!(calculate_scaled_dimensions(200, 100, 50, 100), (50, 25));
-
-        // Both constrained, height is limiting
-        assert_eq!(calculate_scaled_dimensions(100, 200, 100, 50), (25, 50));
-    }
-
-    #[test]
-    fn test_image_cache() {
-        let file = create_test_image();
-        let mut cache = ImageCache::new(2);
-
-        // First access - should decode
-        let img1 = cache.get_or_decode(file.path(), 100, 100);
-        assert!(img1.is_ok());
-
-        // Second access - should hit cache
-        let img2 = cache.get_or_decode(file.path(), 100, 100);
-        assert!(img2.is_ok());
-    }
-
-    #[test]
-    fn test_cache_clear() {
-        let file = create_test_image();
-        let mut cache = ImageCache::new(2);
-
-        cache.get_or_decode(file.path(), 100, 100).unwrap();
-        assert_eq!(cache.cache.len(), 1);
-
-        cache.clear();
-        assert_eq!(cache.cache.len(), 0);
+        let meta = metadata.unwrap();
+        assert_eq!(meta.width, 1);
+        assert_eq!(meta.height, 1);
     }
 }
