@@ -7,10 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["clipboard", "watch", "git"]
+default = ["clipboard", "watch", "git", "images"]
 clipboard = ["mdx-tui/clipboard"]
 watch = ["mdx-tui/watch"]
 git = ["mdx-tui/git"]
+images = ["mdx-tui/images"]
 
 [dependencies]
 # Local crates

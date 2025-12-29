@@ -71,7 +71,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
+fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, pane_id: usize) {
     use ratatui::text::Span;
 
     // Split area for breadcrumb and content
@@ -114,9 +114,9 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         return;
     }
 
-    // Get search query for highlighting
+    // Get search query for highlighting (clone to avoid borrow issues)
     let search_query = if !app.search_query.is_empty() {
-        Some(app.search_query.as_str())
+        Some(app.search_query.clone())
     } else {
         None
     };
@@ -190,7 +190,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
                     cursor,
                     selection_range,
                     left_margin_width,
-                    search_query,
+                    search_query.as_deref(),
                 );
 
                 for line in table_lines {
@@ -203,7 +203,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             }
         }
 
-        // Check for image placeholders
+        // Check for image rendering
         #[cfg(feature = "images")]
         if !in_code_block {
             use mdx_core::config::ImageEnabled;
@@ -217,21 +217,26 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             };
 
             if should_render_images {
-                // Check if there's an image on this line
-                if let Some(image) = app.doc.images.iter().find(|img| img.source_line == line_idx) {
-                    let (placeholder_lines, _consumed) = render_image_placeholder(
+                // Check if there's an image on this line (clone to avoid borrow issues)
+                let image_opt = app.doc.images.iter()
+                    .find(|img| img.source_line == line_idx)
+                    .cloned();
+
+                if let Some(image) = image_opt {
+                    let (image_lines, _consumed) = render_image(
                         app,
                         content_area,
                         line_idx,
-                        image,
+                        &image,
                         line_num_width,
                         is_focused,
                         cursor,
                         selection_range,
                         left_margin_width,
+                        backend,
                     );
 
-                    for line in placeholder_lines {
+                    for line in image_lines {
                         styled_lines.push(line);
                         is_table_row_flags.push(false);
                     }
@@ -304,11 +309,11 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
         if in_code_block {
             // Inside code block - render with syntax highlighting and different background
-            line_spans.extend(render_code_line(line_text, &app.theme, search_query));
+            line_spans.extend(render_code_line(line_text, &app.theme, search_query.as_deref()));
             is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
-            line_spans.extend(style_markdown_line(line_text, &app.theme, search_query));
+            line_spans.extend(style_markdown_line(line_text, &app.theme, search_query.as_deref()));
             is_code_block_line = false;
         }
 
@@ -1156,7 +1161,7 @@ fn render_table_block(
                         cell_line,
                         app.theme.base,
                         app.theme.code,
-                        search_query,
+                        search_query.as_deref(),
                     );
 
                     let cell_width = spans_visual_width(&cell_spans);
@@ -1725,7 +1730,129 @@ fn render_toc_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(popup, popup_area);
 }
 
-/// Render image placeholder
+/// Render image (actual image or placeholder)
+#[cfg(feature = "images")]
+fn render_image(
+    app: &mut App,
+    content_area: ratatui::layout::Rect,
+    source_line: usize,
+    image: &mdx_core::image::ImageNode,
+    line_num_width: usize,
+    is_focused: bool,
+    cursor: usize,
+    selection_range: Option<(usize, usize)>,
+    left_margin_width: u16,
+    backend: mdx_core::config::ImageBackend,
+) -> (Vec<Line<'static>>, usize) {
+    // Try to resolve and load the image
+    let image_result = try_load_image(app, image, content_area);
+
+    match image_result {
+        Ok(Some(decoded)) => {
+            // Successfully loaded - render based on backend
+            render_decoded_image(
+                decoded,
+                content_area,
+                source_line,
+                image,
+                line_num_width,
+                is_focused,
+                cursor,
+                selection_range,
+                left_margin_width,
+                backend,
+            )
+        }
+        _ => {
+            // Failed to load or unsupported - show placeholder
+            render_image_placeholder(
+                app,
+                content_area,
+                source_line,
+                image,
+                line_num_width,
+                is_focused,
+                cursor,
+                selection_range,
+                left_margin_width,
+            )
+        }
+    }
+}
+
+/// Try to load an image from cache or disk/URL
+#[cfg(feature = "images")]
+fn try_load_image(
+    app: &mut App,
+    image: &mdx_core::image::ImageNode,
+    content_area: ratatui::layout::Rect,
+) -> anyhow::Result<Option<crate::image_cache::DecodedImage>> {
+    use mdx_core::image::ImageSource;
+
+    // Resolve image source
+    let source = image.resolve(&app.doc.path);
+
+    let source = match source {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    // Calculate max dimensions based on terminal size
+    let content_width = content_area.width.saturating_sub(2) as u32;
+    let content_height = content_area.height.saturating_sub(2) as u32;
+    let max_width = (content_width * app.config.images.max_width_percent as u32) / 100;
+    let max_height = (content_height * app.config.images.max_height_percent as u32) / 100;
+
+    // Load from cache based on source type
+    let decoded = match source {
+        ImageSource::Local(path) => {
+            app.image_cache.get_or_decode(&path, max_width, max_height)?
+        }
+        ImageSource::Remote(url) => {
+            if !app.config.images.allow_remote {
+                return Ok(None);
+            }
+            app.image_cache.get_or_fetch(&url, max_width, max_height)?
+        }
+    };
+
+    Ok(Some(decoded))
+}
+
+/// Render a decoded image using the appropriate backend
+#[cfg(feature = "images")]
+fn render_decoded_image(
+    _decoded: crate::image_cache::DecodedImage,
+    _content_area: ratatui::layout::Rect,
+    _source_line: usize,
+    image: &mdx_core::image::ImageNode,
+    _line_num_width: usize,
+    _is_focused: bool,
+    _cursor: usize,
+    _selection_range: Option<(usize, usize)>,
+    _left_margin_width: u16,
+    _backend: mdx_core::config::ImageBackend,
+) -> (Vec<Line<'static>>, usize) {
+    // For now, just show that we loaded it successfully
+    // TODO: Actually render using Kitty/iTerm2/Sixel protocols
+    let mut rendered: Vec<Line> = Vec::new();
+
+    let alt_text = if image.alt.is_empty() {
+        "Image loaded"
+    } else {
+        &image.alt
+    };
+    let status_text = format!("[✓ Loaded: {}]", alt_text);
+
+    rendered.push(Line::from(Span::styled(
+        status_text,
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    )));
+
+    (rendered, 1)
+}
+
+/// Render image placeholder when image cannot be loaded
 #[cfg(feature = "images")]
 fn render_image_placeholder(
     app: &App,
