@@ -1,7 +1,7 @@
 //! MDX - A fast TUI Markdown viewer with Vim-style navigation
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use mdx_core::{Config, Document};
 use mdx_tui::App;
 use std::path::PathBuf;
@@ -10,7 +10,17 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "mdx")]
 #[command(author, version, about, long_about = None)]
-struct Args {
+#[command(args_conflicts_with_subcommands = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[command(flatten)]
+    view: Option<ViewArgs>,
+}
+
+#[derive(Parser, Debug)]
+struct ViewArgs {
     /// Path to markdown file
     #[arg(value_name = "FILE")]
     file: PathBuf,
@@ -20,14 +30,37 @@ struct Args {
     insecure: bool,
 }
 
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Initialize default configuration file
+    InitConfig,
+}
+
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
+
+    // Handle subcommands
+    if let Some(command) = cli.command {
+        match command {
+            Commands::InitConfig => {
+                let config_path = Config::write_default()
+                    .context("Failed to initialize config file")?;
+                println!("Created default config file at: {}", config_path.display());
+                return Ok(());
+            }
+        }
+    }
+
+    // Default behavior: open markdown file
+    let view_args = cli.view.ok_or_else(|| {
+        anyhow::anyhow!("No file specified. Use 'mdx <FILE>' to view a file or 'mdx init-config' to initialize configuration.")
+    })?;
 
     // Load configuration
     let (mut config, mut warnings) = Config::load().context("Failed to load configuration")?;
 
     // Override security settings if --insecure flag is set
-    if args.insecure {
+    if view_args.insecure {
         config.security.safe_mode = false;
         config.security.no_exec = false;
         // Clear security warnings when using --insecure
@@ -35,8 +68,8 @@ fn main() -> Result<()> {
     }
 
     // Load document
-    let (doc, doc_warnings) = Document::load(&args.file)
-        .with_context(|| format!("Failed to load document: {}", args.file.display()))?;
+    let (doc, doc_warnings) = Document::load(&view_args.file)
+        .with_context(|| format!("Failed to load document: {}", view_args.file.display()))?;
 
     // Combine warnings from config and document
     warnings.extend(doc_warnings);
