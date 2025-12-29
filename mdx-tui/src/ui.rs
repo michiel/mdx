@@ -203,6 +203,42 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             }
         }
 
+        // Check for image placeholders
+        #[cfg(feature = "images")]
+        if !in_code_block {
+            use mdx_core::config::ImageEnabled;
+            let should_render_images = match app.config.images.enabled {
+                ImageEnabled::Always => true,
+                ImageEnabled::Auto => true, // TODO: Check terminal capabilities
+                ImageEnabled::Never => false,
+            };
+
+            if should_render_images {
+                // Check if there's an image on this line
+                if let Some(image) = app.doc.images.iter().find(|img| img.source_line == line_idx) {
+                    let (placeholder_lines, _consumed) = render_image_placeholder(
+                        app,
+                        content_area,
+                        line_idx,
+                        image,
+                        line_num_width,
+                        is_focused,
+                        cursor,
+                        selection_range,
+                        left_margin_width,
+                    );
+
+                    for line in placeholder_lines {
+                        styled_lines.push(line);
+                        is_table_row_flags.push(false);
+                    }
+
+                    line_idx += 1;
+                    continue;
+                }
+            }
+        }
+
         // Track if this is a table row (before styling splits the pipes)
         let is_table_row = line_text.contains('|');
 
@@ -1684,4 +1720,147 @@ fn render_toc_dialog(frame: &mut Frame, app: &App) {
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
 
     frame.render_widget(popup, popup_area);
+}
+
+/// Render image placeholder
+#[cfg(feature = "images")]
+fn render_image_placeholder(
+    app: &App,
+    content_area: ratatui::layout::Rect,
+    source_line: usize,
+    image: &mdx_core::image::ImageNode,
+    line_num_width: usize,
+    is_focused: bool,
+    cursor: usize,
+    selection_range: Option<(usize, usize)>,
+    left_margin_width: u16,
+) -> (Vec<Line<'static>>, usize) {
+    let mut rendered: Vec<Line> = Vec::new();
+
+    // Calculate placeholder height based on config
+    // Default to 10 lines, but respect configured percentages
+    let content_height = content_area.height.saturating_sub(2) as usize;
+    let content_width = content_area.width.saturating_sub(2) as usize;
+    let max_height_from_config = (content_height * app.config.images.max_height_percent as usize) / 100;
+    let max_width_from_config = (content_width * app.config.images.max_width_percent as usize) / 100;
+
+    // Assume a 2:1 width-to-height ratio for terminal cells (cells are typically taller than wide)
+    // So if we have width W available, we can show height H = W/2
+    let max_height_from_width = max_width_from_config / 2;
+
+    // Take minimum of both constraints
+    let placeholder_height = max_height_from_config.min(max_height_from_width).max(3).min(20);
+
+    // Create placeholder text
+    let alt_text = if image.alt.is_empty() {
+        "Image"
+    } else {
+        &image.alt
+    };
+    let placeholder_text = format!("[Image: {}]", alt_text);
+
+    // Render lines
+    for offset in 0..placeholder_height {
+        let mut line_spans: Vec<Span> = Vec::new();
+
+        // Only show line number and gutter on first line
+        if offset == 0 {
+            let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
+            let line_num_color = if is_focused && source_line == cursor {
+                Color::White
+            } else {
+                Color::DarkGray
+            };
+            line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+
+            #[cfg(feature = "git")]
+            if app.config.git.diff {
+                use mdx_core::diff::DiffMark;
+                let gutter = match app.doc.diff_gutter.get(source_line) {
+                    DiffMark::None => "  ",
+                    DiffMark::Added => "│ ",
+                    DiffMark::Modified => "│ ",
+                    DiffMark::DeletedAfter(_) => "│ ",
+                };
+                let gutter_color = match app.doc.diff_gutter.get(source_line) {
+                    DiffMark::None => Color::DarkGray,
+                    DiffMark::Added => Color::Green,
+                    DiffMark::Modified => Color::Yellow,
+                    DiffMark::DeletedAfter(_) => Color::Red,
+                };
+                line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+            } else {
+                line_spans.push(Span::raw("  "));
+            }
+            #[cfg(not(feature = "git"))]
+            line_spans.push(Span::raw("  "));
+        } else {
+            // Continuation lines - just indent
+            line_spans.push(Span::raw(" ".repeat(left_margin_width as usize)));
+        }
+
+        // Add placeholder content
+        if offset == placeholder_height / 2 {
+            // Center line - show placeholder text
+            let available_width = content_width.saturating_sub(left_margin_width as usize);
+            let text_width = placeholder_text.chars().count();
+
+            if text_width < available_width {
+                let padding_left = (available_width - text_width) / 2;
+                let padding_right = available_width - text_width - padding_left;
+
+                line_spans.push(Span::styled(
+                    " ".repeat(padding_left),
+                    Style::default().bg(Color::Rgb(50, 50, 50))
+                ));
+                line_spans.push(Span::styled(
+                    placeholder_text.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .bg(Color::Rgb(50, 50, 50))
+                        .add_modifier(Modifier::BOLD)
+                ));
+                line_spans.push(Span::styled(
+                    " ".repeat(padding_right),
+                    Style::default().bg(Color::Rgb(50, 50, 50))
+                ));
+            } else {
+                // Text too long, truncate
+                let truncated = format!("{}…", placeholder_text.chars().take(available_width - 1).collect::<String>());
+                line_spans.push(Span::styled(
+                    truncated,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .bg(Color::Rgb(50, 50, 50))
+                        .add_modifier(Modifier::BOLD)
+                ));
+            }
+        } else {
+            // Empty placeholder line
+            let available_width = content_width.saturating_sub(left_margin_width as usize);
+            line_spans.push(Span::styled(
+                " ".repeat(available_width),
+                Style::default().bg(Color::Rgb(50, 50, 50))
+            ));
+        }
+
+        let mut line = Line::from(line_spans);
+
+        // Apply highlighting if this is the cursor or selected line
+        let is_selected = if let Some((start, end)) = selection_range {
+            source_line >= start && source_line <= end
+        } else {
+            false
+        };
+
+        if is_focused && is_selected {
+            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        } else if is_focused && source_line == cursor {
+            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        }
+
+        rendered.push(line);
+    }
+
+    (rendered, 1) // Consumed 1 source line
 }

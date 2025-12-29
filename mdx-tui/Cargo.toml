@@ -11,6 +11,7 @@ default = ["clipboard", "watch", "git"]
 clipboard = ["mdx-core/clipboard", "dep:arboard"]
 watch = ["mdx-core/watch", "dep:notify"]
 git = ["mdx-core/git"]
+images = ["mdx-core/images"]
 
 [dependencies]
 # Core crate
