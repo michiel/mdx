@@ -1,8 +1,7 @@
 //! Git integration using gix
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Repository context for a file
 #[derive(Debug)]
@@ -57,41 +56,30 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     }))
 }
 
-/// Check if a path is ignored by git
+/// Check if a path should be excluded from git diff display
+///
+/// Returns true if the file should be skipped.
+/// For simplicity and reliability, we only show git diff for tracked files (in the index).
+/// Untracked files are treated as if they were ignored for diff purposes.
 #[cfg(feature = "git")]
 fn is_path_ignored(repo: &gix::Repository, rel_path: &Path) -> bool {
     use bstr::ByteSlice;
 
-    // First check if path is in index (tracked files can't be ignored)
+    // Check if path is in index (tracked files are never ignored)
     if let Ok(index) = repo.index() {
         // Convert Path to BStr for gix API
         let path_str = rel_path.to_string_lossy();
         let path_bytes = path_str.as_bytes();
         if index.entry_by_path(path_bytes.as_bstr()).is_some() {
-            // File is tracked, so not ignored
+            // File is tracked in git index - show diff
             return false;
         }
     }
 
-    // For untracked files, use git check-ignore command as reliable method
-    if let Some(workdir) = repo.workdir() {
-        let full_path = workdir.join(rel_path);
-
-        // Run git check-ignore on the file
-        let output = Command::new("git")
-            .arg("check-ignore")
-            .arg("-q")
-            .arg(&full_path)
-            .current_dir(workdir)
-            .output();
-
-        if let Ok(output) = output {
-            // Exit code 0 means the file is ignored
-            return output.status.success();
-        }
-    }
-
-    false
+    // File is not tracked - don't show diff for untracked files
+    // This is a simple, conservative approach that works reliably without
+    // needing complex .gitignore pattern matching
+    true
 }
 
 #[cfg(not(feature = "git"))]
@@ -177,64 +165,3 @@ pub fn get_base_text_gix(file_path: &Path) -> Result<Option<String>> {
     read_head_file_text(&repo_ctx.repo, &repo_ctx.rel_path)
 }
 
-/// Get base text from git HEAD using subprocess (Stage 12 temporary implementation)
-/// Deprecated: Use get_base_text_gix instead
-#[cfg(feature = "git")]
-#[allow(dead_code)]
-pub fn get_base_text_subprocess(file_path: &Path) -> Result<Option<String>> {
-    // Check if we're in a git repo by trying to find the root
-    let repo_root = find_git_root(file_path)?;
-    if repo_root.is_none() {
-        return Ok(None);
-    }
-
-    let repo_root = repo_root.unwrap();
-
-    // Get relative path from repo root
-    let rel_path = file_path
-        .strip_prefix(&repo_root)
-        .context("Failed to compute relative path")?;
-
-    // Try to get file from HEAD using git show
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("show")
-        .arg(format!("HEAD:{}", rel_path.display()))
-        .output();
-
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
-            } else {
-                // File not in HEAD (new file)
-                Ok(Some(String::new()))
-            }
-        }
-        Err(_) => {
-            // Git command failed
-            Ok(None)
-        }
-    }
-}
-
-/// Find git repository root by walking up parents
-fn find_git_root(start_path: &Path) -> Result<Option<PathBuf>> {
-    let mut current = start_path
-        .parent()
-        .unwrap_or(start_path)
-        .to_path_buf();
-
-    loop {
-        let git_dir = current.join(".git");
-        if git_dir.exists() {
-            return Ok(Some(current));
-        }
-
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            None => return Ok(None),
-        }
-    }
-}
