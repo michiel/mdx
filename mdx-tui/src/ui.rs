@@ -1833,37 +1833,37 @@ fn render_decoded_image(
     left_margin_width: u16,
     backend: mdx_core::config::ImageBackend,
 ) -> (Vec<Line<'static>>, usize) {
-    use mdx_core::config::ImageBackend;
+    // For now, terminal graphics protocols don't work well through ratatui
+    // because ratatui processes all content as text and escapes control sequences.
+    //
+    // To properly support inline images, we would need to:
+    // 1. Write escape sequences directly to stdout outside of ratatui
+    // 2. Coordinate cursor positioning with ratatui's rendering
+    // 3. Handle terminal state management carefully
+    //
+    // This is complex and error-prone. For now, show a nice placeholder
+    // with information about the loaded image.
 
-    // Calculate display dimensions in terminal cells
-    let content_height = content_area.height.saturating_sub(2) as u16;
-
-    // Terminal cells are roughly 2:1 aspect ratio (width:height in pixels)
-    // So to maintain aspect ratio, we need height_cells ≈ pixel_height / (2 * pixel_width) * width_cells
     let aspect_ratio = decoded.height as f32 / decoded.width as f32;
     let max_width = content_area.width.saturating_sub(left_margin_width).saturating_sub(5) as u32;
     let width_cells = (decoded.width / 10).min(max_width) as u16;
     let height_cells = ((width_cells as f32 * aspect_ratio) / 2.0).ceil() as u16;
+    let content_height = content_area.height.saturating_sub(2) as u16;
     let height_cells = height_cells.min(content_height).max(1);
 
-    // Generate terminal graphics escape sequences
-    let graphics_result = match backend {
-        ImageBackend::Kitty => render_kitty_image(&decoded, width_cells, height_cells, source_line),
-        ImageBackend::ITerm2 => render_iterm2_image(&decoded, width_cells, height_cells),
-        ImageBackend::Sixel => render_sixel_image(&decoded, width_cells, height_cells),
-        ImageBackend::None | ImageBackend::Auto => {
-            // Fallback to placeholder
-            return render_image_placeholder_simple(image, height_cells as usize, source_line, line_num_width, is_focused, cursor, selection_range, left_margin_width);
-        }
-    };
-
-    match graphics_result {
-        Ok(lines) => (lines, 1),
-        Err(_) => {
-            // On error, show placeholder
-            render_image_placeholder_simple(image, height_cells as usize, source_line, line_num_width, is_focused, cursor, selection_range, left_margin_width)
-        }
-    }
+    // Show informative placeholder with image details
+    render_image_info_placeholder(
+        image,
+        &decoded,
+        height_cells as usize,
+        backend,
+        source_line,
+        line_num_width,
+        is_focused,
+        cursor,
+        selection_range,
+        left_margin_width,
+    )
 }
 
 /// Render image using Kitty graphics protocol
@@ -1972,6 +1972,75 @@ fn render_sixel_image(
     }
 
     Ok(lines)
+}
+
+/// Render placeholder with image information
+#[cfg(feature = "images")]
+fn render_image_info_placeholder(
+    image: &mdx_core::image::ImageNode,
+    decoded: &crate::image_cache::DecodedImage,
+    height: usize,
+    backend: mdx_core::config::ImageBackend,
+    _source_line: usize,
+    _line_num_width: usize,
+    _is_focused: bool,
+    _cursor: usize,
+    _selection_range: Option<(usize, usize)>,
+    _left_margin_width: u16,
+) -> (Vec<Line<'static>>, usize) {
+    let mut lines = Vec::new();
+
+    let alt_text = if image.alt.is_empty() {
+        "Image"
+    } else {
+        &image.alt
+    };
+
+    // Format image information
+    let backend_name = match backend {
+        mdx_core::config::ImageBackend::Kitty => "Kitty",
+        mdx_core::config::ImageBackend::ITerm2 => "iTerm2",
+        mdx_core::config::ImageBackend::Sixel => "Sixel",
+        _ => "None",
+    };
+
+    let info_text = format!(
+        "🖼  {} | {}x{} | {}",
+        alt_text,
+        decoded.width,
+        decoded.height,
+        backend_name
+    );
+
+    // Show informative placeholder for calculated height
+    let display_height = height.max(3);
+    for i in 0..display_height {
+        if i == display_height / 2 {
+            // Center line with info
+            lines.push(Line::from(Span::styled(
+                info_text.clone(),
+                Style::default()
+                    .fg(Color::Rgb(100, 200, 255))
+                    .bg(Color::Rgb(30, 40, 50))
+                    .add_modifier(Modifier::BOLD)
+            )));
+        } else if i == 0 || i == display_height - 1 {
+            // Border lines
+            let border = "─".repeat(info_text.len().min(60));
+            lines.push(Line::from(Span::styled(
+                border,
+                Style::default().fg(Color::Rgb(60, 80, 100)).bg(Color::Rgb(20, 25, 30))
+            )));
+        } else {
+            // Empty placeholder line
+            lines.push(Line::from(Span::styled(
+                " ".repeat(info_text.len().min(60)),
+                Style::default().bg(Color::Rgb(20, 25, 30))
+            )));
+        }
+    }
+
+    (lines, 1)
 }
 
 /// Simple placeholder rendering for error cases
