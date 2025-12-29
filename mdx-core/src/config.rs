@@ -13,6 +13,8 @@ pub struct Config {
     pub watch: WatchConfig,
     #[cfg(feature = "git")]
     pub git: GitConfig,
+    #[cfg(feature = "images")]
+    pub images: ImageConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,6 +63,37 @@ pub enum GitBase {
     Index,
 }
 
+#[cfg(feature = "images")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageConfig {
+    pub enabled: ImageEnabled,
+    pub backend: ImageBackend,
+    pub max_width_percent: u8,
+    pub max_height_percent: u8,
+    pub allow_remote: bool,
+    pub cache_dir: Option<PathBuf>,
+}
+
+#[cfg(feature = "images")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageEnabled {
+    Auto,
+    Always,
+    Never,
+}
+
+#[cfg(feature = "images")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageBackend {
+    Auto,
+    Kitty,
+    ITerm2,
+    Sixel,
+    None,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -71,6 +104,8 @@ impl Default for Config {
             watch: WatchConfig::default(),
             #[cfg(feature = "git")]
             git: GitConfig::default(),
+            #[cfg(feature = "images")]
+            images: ImageConfig::default(),
         }
     }
 }
@@ -110,6 +145,20 @@ impl Default for GitConfig {
         Self {
             diff: true,
             base: GitBase::Head,
+        }
+    }
+}
+
+#[cfg(feature = "images")]
+impl Default for ImageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: ImageEnabled::Auto,
+            backend: ImageBackend::Auto,
+            max_width_percent: 90,
+            max_height_percent: 50,
+            allow_remote: false,
+            cache_dir: None,
         }
     }
 }

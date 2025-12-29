@@ -17,6 +17,9 @@ pub mod diff;
 #[cfg(feature = "git")]
 pub mod git;
 
+#[cfg(feature = "images")]
+pub mod image;
+
 // Re-export commonly used types
 pub use config::Config;
 pub use doc::Document;
