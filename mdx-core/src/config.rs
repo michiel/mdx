@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub theme: ThemeVariant,
     pub toc: TocConfig,
     pub editor: EditorConfig,
+    pub security: SecurityConfig,
     #[cfg(feature = "watch")]
     pub watch: WatchConfig,
     #[cfg(feature = "git")]
@@ -42,6 +44,13 @@ pub struct EditorConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecurityConfig {
+    pub safe_mode: bool,
+    pub no_exec: bool,
+}
+
 #[cfg(feature = "watch")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchConfig {
@@ -65,8 +74,12 @@ pub enum GitBase {
 
 #[cfg(feature = "images")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ImageConfig {
     pub enabled: bool,
+    pub allow_absolute: bool,
+    pub allow_remote: bool,
+    pub max_bytes: u64,
 }
 
 impl Default for Config {
@@ -75,6 +88,7 @@ impl Default for Config {
             theme: ThemeVariant::Dark,
             toc: TocConfig::default(),
             editor: EditorConfig::default(),
+            security: SecurityConfig::default(),
             #[cfg(feature = "watch")]
             watch: WatchConfig::default(),
             #[cfg(feature = "git")]
@@ -104,6 +118,15 @@ impl Default for EditorConfig {
     }
 }
 
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            safe_mode: false,
+            no_exec: false,
+        }
+    }
+}
+
 #[cfg(feature = "watch")]
 impl Default for WatchConfig {
     fn default() -> Self {
@@ -128,7 +151,10 @@ impl Default for GitConfig {
 impl Default for ImageConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
+            allow_absolute: false,
+            allow_remote: false,
+            max_bytes: 10 * 1024 * 1024,
         }
     }
 }
@@ -149,15 +175,23 @@ impl Config {
                 let content = std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-                let config: Config = serde_yaml::from_str(&content)
+                let mut config: Config = serde_yaml::from_str(&content)
                     .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+
+                if config.security.safe_mode {
+                    config.images.enabled = false;
+                }
 
                 return Ok(config);
             }
         }
 
         // No config file, use defaults
-        Ok(Self::default())
+        let mut config = Self::default();
+        if config.security.safe_mode {
+            config.images.enabled = false;
+        }
+        Ok(config)
     }
 
     /// Load from a specific path (for testing)
@@ -165,8 +199,15 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        serde_yaml::from_str(&content)
+        let mut config: Config = serde_yaml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))
+            ?;
+
+        if config.security.safe_mode {
+            config.images.enabled = false;
+        }
+
+        Ok(config)
     }
 }
 
@@ -184,6 +225,19 @@ mod tests {
         assert_eq!(config.toc.side, TocSide::Left);
         assert_eq!(config.toc.width, 32);
         assert_eq!(config.editor.command, "$EDITOR");
+    }
+
+    #[test]
+    fn security_defaults() {
+        let config = Config::default();
+        assert!(!config.security.safe_mode);
+        assert!(!config.security.no_exec);
+        if cfg!(feature = "images") {
+            assert!(!config.images.enabled);
+            assert!(!config.images.allow_absolute);
+            assert!(!config.images.allow_remote);
+            assert!(config.images.max_bytes > 0);
+        }
     }
 
     #[test]
@@ -212,7 +266,7 @@ editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: true\n");
+            yaml_content.push_str("images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: false\n  max_bytes: 2048\n");
         }
 
         let yaml_content = yaml_content;
@@ -224,6 +278,9 @@ editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
         assert_eq!(config.toc.side, TocSide::Right);
         assert_eq!(config.toc.width, 40);
         assert_eq!(config.editor.command, "nvim");
+        assert!(config.images.allow_absolute);
+        assert!(!config.images.allow_remote);
+        assert_eq!(config.images.max_bytes, 2048);
 
         Ok(())
     }
@@ -246,7 +303,7 @@ editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: true\n");
+            yaml_content.push_str("images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: false\n  max_bytes: 2048\n");
         }
 
         file.write_all(yaml_content.as_bytes())?;
@@ -254,6 +311,27 @@ editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
         let config = Config::load_from(file.path())?;
         assert_eq!(config.theme, ThemeVariant::Light);
         assert!(config.toc.enabled);
+        assert!(config.images.allow_absolute);
+        assert!(!config.images.allow_remote);
+        assert_eq!(config.images.max_bytes, 2048);
+
+        Ok(())
+    }
+
+    #[test]
+    fn security_safe_mode_disables_images() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        let yaml_content = "theme: Dark\n\
+security:\n  safe_mode: true\n  no_exec: false\n\
+toc:\n  enabled: false\n  side: Left\n  width: 32\n\
+editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n\
+images:\n  enabled: true\n  allow_absolute: true\n  allow_remote: true\n  max_bytes: 2048\n";
+
+        file.write_all(yaml_content.as_bytes())?;
+
+        let config = Config::load_from(file.path())?;
+        assert!(config.security.safe_mode);
+        assert!(!config.images.enabled);
 
         Ok(())
     }

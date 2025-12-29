@@ -47,9 +47,32 @@ impl ImageNode {
 
     /// Resolve image source relative to document path
     pub fn resolve(&self, doc_path: &Path) -> Option<ImageSource> {
+        self.resolve_with_policy(doc_path, true, true)
+    }
+
+    /// Resolve image source relative to document path with policy controls
+    pub fn resolve_with_policy(
+        &self,
+        doc_path: &Path,
+        allow_absolute: bool,
+        allow_remote: bool,
+    ) -> Option<ImageSource> {
         // Check if src is a URL
         if self.src.starts_with("http://") || self.src.starts_with("https://") {
-            return Some(ImageSource::Remote(self.src.clone()));
+            if allow_remote {
+                return Some(ImageSource::Remote(self.src.clone()));
+            }
+            return None;
+        }
+
+        let src_path = Path::new(&self.src);
+        if src_path.is_absolute() {
+            if allow_absolute {
+                if let Ok(canonical) = src_path.canonicalize() {
+                    return Some(ImageSource::Local(canonical));
+                }
+            }
+            return None;
         }
 
         // Resolve relative to document directory
@@ -58,6 +81,14 @@ impl ImageNode {
 
         // Canonicalise if it exists
         if let Ok(canonical) = img_path.canonicalize() {
+            if !allow_absolute {
+                if let Ok(canonical_doc_dir) = doc_dir.canonicalize() {
+                    if !canonical.starts_with(canonical_doc_dir) {
+                        return None;
+                    }
+                }
+            }
+
             Some(ImageSource::Local(canonical))
         } else {
             None
@@ -185,5 +216,35 @@ mod tests {
         let resolved = img.resolve(doc_path);
 
         assert!(matches!(resolved, Some(ImageSource::Local(_))));
+    }
+
+    #[test]
+    fn security_rejects_remote_images_by_default() {
+        let img = ImageNode::new(
+            "https://example.com/image.png".to_string(),
+            "Remote".to_string(),
+            0,
+        );
+        let doc_path = Path::new("/tmp/test.md");
+        let resolved = img.resolve_with_policy(doc_path, false, false);
+
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn security_rejects_absolute_paths_by_default() {
+        let temp_dir = TempDir::new().unwrap();
+        let img_path = temp_dir.path().join("image.png");
+        fs::write(&img_path, b"fake image").unwrap();
+
+        let doc_path = temp_dir.path().join("test.md");
+        let img = ImageNode::new(
+            img_path.to_string_lossy().to_string(),
+            "Absolute".to_string(),
+            0,
+        );
+        let resolved = img.resolve_with_policy(&doc_path, false, false);
+
+        assert!(resolved.is_none());
     }
 }

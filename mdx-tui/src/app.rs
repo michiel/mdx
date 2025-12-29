@@ -71,6 +71,11 @@ pub struct App {
 impl App {
     /// Create a new application instance with a document
     pub fn new(config: Config, doc: Document) -> Self {
+        let mut config = config;
+        if config.security.safe_mode {
+            config.images.enabled = false;
+        }
+
         let show_toc = config.toc.enabled;
         let theme_variant = config.theme;
         let theme = Theme::for_variant(theme_variant);
@@ -554,6 +559,10 @@ impl App {
     /// Open the current file in an external editor
     pub fn open_in_editor(&self) -> anyhow::Result<()> {
         use crate::editor;
+
+        if self.config.security.no_exec || self.config.security.safe_mode {
+            anyhow::bail!("External commands are disabled by configuration");
+        }
 
         let pane = self.panes.focused_pane()
             .ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
@@ -1060,5 +1069,27 @@ mod tests {
                 // Clipboard might not be available in test environment
             }
         }
+    }
+
+    #[test]
+    fn security_no_exec_blocks_editor() {
+        let mut config = Config::default();
+        config.security.no_exec = true;
+        let doc = create_test_doc(1);
+        let app = App::new(config, doc);
+
+        let result = app.open_in_editor();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn security_safe_mode_blocks_editor() {
+        let mut config = Config::default();
+        config.security.safe_mode = true;
+        let doc = create_test_doc(1);
+        let app = App::new(config, doc);
+
+        let result = app.open_in_editor();
+        assert!(result.is_err());
     }
 }

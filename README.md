@@ -186,6 +186,11 @@ editor:
   command: "$EDITOR"   # Use $EDITOR environment variable
   args: ["+{line}", "{file}"]  # {line} and {file} are replaced at runtime
 
+# Security options
+security:
+  safe_mode: false     # Sanitise terminal output, disable external commands, and turn off images
+  no_exec: false       # Disable external editor execution
+
 # File watching settings
 watch:
   enabled: true        # Watch files for changes
@@ -195,6 +200,13 @@ watch:
 git:
   diff: true           # Show git diff gutter
   base: head           # Options: head, index (compare against HEAD or staging area)
+
+# Image rendering settings
+images:
+  enabled: false
+  allow_absolute: false
+  allow_remote: false
+  max_bytes: 10485760
 ```
 
 ### Editor Configuration Examples

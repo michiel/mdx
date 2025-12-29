@@ -71,6 +71,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
+fn sanitize_for_terminal(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch == '\x1b' {
+            continue;
+        }
+        if ch.is_control() {
+            output.push(' ');
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
 fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, pane_id: usize) {
     use ratatui::text::Span;
 
@@ -172,13 +187,13 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         };
 
         // Remove trailing newline for styling
-        let line_text = line_text.trim_end_matches('\n');
+        let line_text = sanitize_for_terminal(line_text.trim_end_matches('\n'));
 
         // Table detection: header row followed by a separator row
         if !in_code_block && line_idx + 1 < line_count {
             let next_line: String = app.doc.rope.line(line_idx + 1).chunks().collect();
-            let next_line = next_line.trim_end_matches('\n');
-            if is_table_row(line_text) && is_table_separator_row(next_line) {
+            let next_line = sanitize_for_terminal(next_line.trim_end_matches('\n'));
+            if is_table_row(&line_text) && is_table_separator_row(&next_line) {
                 let (table_lines, consumed) = render_table_block(
                     app,
                     content_area,
@@ -205,7 +220,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
         // Check for image rendering
         #[cfg(feature = "images")]
-        if !in_code_block && app.config.images.enabled {
+        if !in_code_block && app.config.images.enabled && !app.config.security.safe_mode {
             // Check if there's an image on this line (clone to avoid borrow issues)
             let image_opt = app.doc.images.iter()
                 .find(|img| img.source_line == line_idx)
@@ -296,11 +311,11 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
         if in_code_block {
             // Inside code block - render with syntax highlighting and different background
-            line_spans.extend(render_code_line(line_text, &app.theme, search_query.as_deref()));
+            line_spans.extend(render_code_line(&line_text, &app.theme, search_query.as_deref()));
             is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
-            line_spans.extend(style_markdown_line(line_text, &app.theme, search_query.as_deref()));
+            line_spans.extend(style_markdown_line(&line_text, &app.theme, search_query.as_deref()));
             is_code_block_line = false;
         }
 
@@ -637,7 +652,7 @@ fn render_raw_text(
         };
 
         // Remove trailing newline
-        let line_text = line_text.trim_end_matches('\n');
+        let line_text = sanitize_for_terminal(line_text.trim_end_matches('\n'));
 
         // Add line number
         let line_num = format!("{:>width$} ", line_idx + 1, width = line_num_width);
@@ -1049,7 +1064,7 @@ fn render_table_block(
     let mut idx = start_idx;
     while idx < line_count {
         let line_text: String = app.doc.rope.line(idx).chunks().collect();
-        let line_text = line_text.trim_end_matches('\n').to_string();
+        let line_text = sanitize_for_terminal(line_text.trim_end_matches('\n'));
         if !is_table_row(&line_text) {
             break;
         }
@@ -1775,7 +1790,9 @@ fn try_load_image(
     use mdx_core::image::ImageSource;
 
     // Resolve image source
-    let source = image.resolve(&app.doc.path);
+    let allow_absolute = app.config.images.allow_absolute && !app.config.security.safe_mode;
+    let allow_remote = app.config.images.allow_remote && !app.config.security.safe_mode;
+    let source = image.resolve_with_policy(&app.doc.path, allow_absolute, allow_remote);
 
     let source = match source {
         Some(s) => s,
@@ -1785,6 +1802,13 @@ fn try_load_image(
     // Read metadata based on source type
     let metadata = match source {
         ImageSource::Local(path) => {
+            if app.config.images.max_bytes > 0 {
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if meta.len() > app.config.images.max_bytes {
+                        return Ok(None);
+                    }
+                }
+            }
             crate::image_cache::ImageMetadata::from_path(&path)?
         }
         ImageSource::Remote(_url) => {
@@ -1816,6 +1840,7 @@ fn render_image_info_placeholder(
     } else {
         &image.alt
     };
+    let alt_text = sanitize_for_terminal(alt_text);
 
     // Format image information
     let info_text = format!(
@@ -1910,6 +1935,7 @@ fn render_image_placeholder(
     } else {
         &image.alt
     };
+    let alt_text = sanitize_for_terminal(alt_text);
 
     // Format error message
     let info_text = format!("🖼  {} | [unable to read]", alt_text);
@@ -1976,4 +2002,46 @@ fn render_image_placeholder(
     lines.push(line);
 
     (lines, 1)
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::sanitize_for_terminal;
+    use crate::app::App;
+    use mdx_core::{Config, Document};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn security_sanitises_control_characters() {
+        let input = "safe\x1b[31mred\x07text";
+        let output = sanitize_for_terminal(input);
+        assert!(!output.contains('\x1b'));
+        assert!(!output.contains('\x07'));
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn security_image_size_limit_blocks_metadata() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"not a real image").unwrap();
+        file.flush().unwrap();
+
+        let mut doc_file = NamedTempFile::new().unwrap();
+        writeln!(doc_file, "![alt]({})", file.path().display()).unwrap();
+        doc_file.flush().unwrap();
+
+        let doc = Document::load(doc_file.path()).unwrap();
+        let mut config = Config::default();
+        config.images.enabled = true;
+        config.images.allow_absolute = true;
+        config.images.max_bytes = 1;
+
+        let app = App::new(config, doc);
+        let image = app.doc.images.first().unwrap();
+        let result = super::try_load_image(&app, image, ratatui::layout::Rect::default())
+            .unwrap();
+
+        assert!(result.is_none());
+    }
 }
