@@ -205,45 +205,32 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
         // Check for image rendering
         #[cfg(feature = "images")]
-        if !in_code_block {
-            use mdx_core::config::ImageEnabled;
-            let backend = crate::image_backend::select_backend(app.config.images.backend);
-            let has_backend = !matches!(backend, mdx_core::config::ImageBackend::None);
+        if !in_code_block && app.config.images.enabled {
+            // Check if there's an image on this line (clone to avoid borrow issues)
+            let image_opt = app.doc.images.iter()
+                .find(|img| img.source_line == line_idx)
+                .cloned();
 
-            let should_render_images = match app.config.images.enabled {
-                ImageEnabled::Always => true,
-                ImageEnabled::Auto => has_backend,
-                ImageEnabled::Never => false,
-            };
+            if let Some(image) = image_opt {
+                let (image_lines, _consumed) = render_image(
+                    app,
+                    content_area,
+                    line_idx,
+                    &image,
+                    line_num_width,
+                    is_focused,
+                    cursor,
+                    selection_range,
+                    left_margin_width,
+                );
 
-            if should_render_images {
-                // Check if there's an image on this line (clone to avoid borrow issues)
-                let image_opt = app.doc.images.iter()
-                    .find(|img| img.source_line == line_idx)
-                    .cloned();
-
-                if let Some(image) = image_opt {
-                    let (image_lines, _consumed) = render_image(
-                        app,
-                        content_area,
-                        line_idx,
-                        &image,
-                        line_num_width,
-                        is_focused,
-                        cursor,
-                        selection_range,
-                        left_margin_width,
-                        backend,
-                    );
-
-                    for line in image_lines {
-                        styled_lines.push(line);
-                        is_table_row_flags.push(false);
-                    }
-
-                    line_idx += 1;
-                    continue;
+                for line in image_lines {
+                    styled_lines.push(line);
+                    is_table_row_flags.push(false);
                 }
+
+                line_idx += 1;
+                continue;
             }
         }
 
@@ -1742,30 +1729,27 @@ fn render_image(
     cursor: usize,
     selection_range: Option<(usize, usize)>,
     left_margin_width: u16,
-    backend: mdx_core::config::ImageBackend,
 ) -> (Vec<Line<'static>>, usize) {
     // Try to resolve and load the image
     let image_result = try_load_image(app, image, content_area);
 
     match image_result {
         Ok(Some(decoded)) => {
-            // Successfully loaded - render based on backend
-            render_decoded_image(
+            // Successfully loaded - show placeholder with image info
+            render_image_info_placeholder(
                 app,
-                decoded,
-                content_area,
-                source_line,
                 image,
+                &decoded,
+                source_line,
                 line_num_width,
                 is_focused,
                 cursor,
                 selection_range,
                 left_margin_width,
-                backend,
             )
         }
         _ => {
-            // Failed to load or unsupported - show placeholder
+            // Failed to load - show placeholder
             render_image_placeholder(
                 app,
                 content_area,
@@ -1820,171 +1804,12 @@ fn try_load_image(
     Ok(Some(decoded))
 }
 
-/// Render a decoded image using the appropriate backend
-#[cfg(feature = "images")]
-fn render_decoded_image(
-    app: &App,
-    decoded: crate::image_cache::DecodedImage,
-    content_area: ratatui::layout::Rect,
-    source_line: usize,
-    image: &mdx_core::image::ImageNode,
-    line_num_width: usize,
-    is_focused: bool,
-    cursor: usize,
-    selection_range: Option<(usize, usize)>,
-    left_margin_width: u16,
-    backend: mdx_core::config::ImageBackend,
-) -> (Vec<Line<'static>>, usize) {
-    // For now, terminal graphics protocols don't work well through ratatui
-    // because ratatui processes all content as text and escapes control sequences.
-    //
-    // To properly support inline images, we would need to:
-    // 1. Write escape sequences directly to stdout outside of ratatui
-    // 2. Coordinate cursor positioning with ratatui's rendering
-    // 3. Handle terminal state management carefully
-    //
-    // This is complex and error-prone. For now, show a nice placeholder
-    // with information about the loaded image.
-
-    let aspect_ratio = decoded.height as f32 / decoded.width as f32;
-    let max_width = content_area.width.saturating_sub(left_margin_width).saturating_sub(5) as u32;
-    let width_cells = (decoded.width / 10).min(max_width) as u16;
-    let height_cells = ((width_cells as f32 * aspect_ratio) / 2.0).ceil() as u16;
-    let content_height = content_area.height.saturating_sub(2) as u16;
-    let height_cells = height_cells.min(content_height).max(1);
-
-    // Show informative placeholder with image details
-    render_image_info_placeholder(
-        app,
-        image,
-        &decoded,
-        height_cells as usize,
-        backend,
-        source_line,
-        line_num_width,
-        is_focused,
-        cursor,
-        selection_range,
-        left_margin_width,
-    )
-}
-
-/// Render image using Kitty graphics protocol
-#[cfg(feature = "images")]
-fn render_kitty_image(
-    decoded: &crate::image_cache::DecodedImage,
-    _width_cells: u16,
-    height_cells: u16,
-    image_id: usize,
-) -> anyhow::Result<Vec<Line<'static>>> {
-    use std::io::Write;
-
-    // Generate unique image ID based on line number
-    let id = image_id as u32;
-
-    // Transmit image data
-    let transmit_seq = crate::kitty_graphics::transmit_image(
-        &decoded.data,
-        decoded.width,
-        decoded.height,
-        id,
-    )?;
-
-    // Display image
-    let display_seq = crate::kitty_graphics::display_image(
-        id,
-        height_cells,
-        decoded.width as u16,
-    )?;
-
-    // Combine sequences
-    let mut combined = Vec::new();
-    combined.write_all(&transmit_seq)?;
-    combined.write_all(&display_seq)?;
-
-    // Convert to string and create a single line with escape sequences
-    let escape_str = String::from_utf8_lossy(&combined).to_string();
-
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::raw(escape_str)));
-
-    // Add empty lines for vertical spacing
-    for _ in 1..height_cells {
-        lines.push(Line::from(Span::raw("")));
-    }
-
-    Ok(lines)
-}
-
-/// Render image using iTerm2 inline images protocol
-#[cfg(feature = "images")]
-fn render_iterm2_image(
-    decoded: &crate::image_cache::DecodedImage,
-    width_cells: u16,
-    height_cells: u16,
-) -> anyhow::Result<Vec<Line<'static>>> {
-    // First encode RGBA as PNG
-    let png_data = crate::iterm2_graphics::encode_rgba_as_png(
-        &decoded.data,
-        decoded.width,
-        decoded.height,
-    )?;
-
-    // Display image
-    let display_seq = crate::iterm2_graphics::display_image(
-        &png_data,
-        width_cells,
-        height_cells,
-    )?;
-
-    let escape_str = String::from_utf8_lossy(&display_seq).to_string();
-
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::raw(escape_str)));
-
-    // Add empty lines for vertical spacing
-    for _ in 1..height_cells {
-        lines.push(Line::from(Span::raw("")));
-    }
-
-    Ok(lines)
-}
-
-/// Render image using Sixel graphics protocol
-#[cfg(feature = "images")]
-fn render_sixel_image(
-    decoded: &crate::image_cache::DecodedImage,
-    _width_cells: u16,
-    height_cells: u16,
-) -> anyhow::Result<Vec<Line<'static>>> {
-    // Encode as Sixel
-    let sixel_data = crate::sixel_graphics::encode_sixel(
-        &decoded.data,
-        decoded.width,
-        decoded.height,
-    )?;
-
-    let escape_str = String::from_utf8_lossy(&sixel_data).to_string();
-
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::raw(escape_str)));
-
-    // Add empty lines for vertical spacing
-    for _ in 1..height_cells {
-        lines.push(Line::from(Span::raw("")));
-    }
-
-    Ok(lines)
-}
-
 /// Render placeholder with image information
 #[cfg(feature = "images")]
 fn render_image_info_placeholder(
     app: &App,
     image: &mdx_core::image::ImageNode,
     decoded: &crate::image_cache::DecodedImage,
-    height: usize,
-    backend: mdx_core::config::ImageBackend,
     source_line: usize,
     line_num_width: usize,
     is_focused: bool,
@@ -2001,19 +1826,11 @@ fn render_image_info_placeholder(
     };
 
     // Format image information
-    let backend_name = match backend {
-        mdx_core::config::ImageBackend::Kitty => "Kitty",
-        mdx_core::config::ImageBackend::ITerm2 => "iTerm2",
-        mdx_core::config::ImageBackend::Sixel => "Sixel",
-        _ => "None",
-    };
-
     let info_text = format!(
-        "🖼  {} | {}x{} | {}",
+        "🖼  {} | {}x{}",
         alt_text,
         decoded.width,
-        decoded.height,
-        backend_name
+        decoded.height
     );
 
     // Check if this line is selected
@@ -2077,47 +1894,6 @@ fn render_image_info_placeholder(
     }
 
     lines.push(line);
-
-    (lines, 1)
-}
-
-/// Simple placeholder rendering for error cases
-#[cfg(feature = "images")]
-fn render_image_placeholder_simple(
-    image: &mdx_core::image::ImageNode,
-    height: usize,
-    _source_line: usize,
-    _line_num_width: usize,
-    _is_focused: bool,
-    _cursor: usize,
-    _selection_range: Option<(usize, usize)>,
-    _left_margin_width: u16,
-) -> (Vec<Line<'static>>, usize) {
-    let mut lines = Vec::new();
-
-    let alt_text = if image.alt.is_empty() {
-        "Image"
-    } else {
-        &image.alt
-    };
-
-    // Show placeholder for calculated height
-    for i in 0..height.max(1) {
-        if i == height / 2 {
-            // Center line with text
-            let text = format!("[Image: {}]", alt_text);
-            lines.push(Line::from(Span::styled(
-                text,
-                Style::default().fg(Color::Cyan).bg(Color::Rgb(50, 50, 50))
-            )));
-        } else {
-            // Empty placeholder line
-            lines.push(Line::from(Span::styled(
-                " ".repeat(30),
-                Style::default().bg(Color::Rgb(50, 50, 50))
-            )));
-        }
-    }
 
     (lines, 1)
 }

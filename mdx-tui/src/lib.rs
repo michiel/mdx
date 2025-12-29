@@ -25,14 +25,6 @@ pub mod watcher;
 pub mod diff_worker;
 #[cfg(feature = "images")]
 pub mod image_cache;
-#[cfg(feature = "images")]
-pub mod image_backend;
-#[cfg(feature = "images")]
-pub mod kitty_graphics;
-#[cfg(feature = "images")]
-pub mod iterm2_graphics;
-#[cfg(feature = "images")]
-pub mod sixel_graphics;
 
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyEventKind};

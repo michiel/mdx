@@ -66,32 +66,11 @@ pub enum GitBase {
 #[cfg(feature = "images")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageConfig {
-    pub enabled: ImageEnabled,
-    pub backend: ImageBackend,
+    pub enabled: bool,
     pub max_width_percent: u8,
     pub max_height_percent: u8,
     pub allow_remote: bool,
     pub cache_dir: Option<PathBuf>,
-}
-
-#[cfg(feature = "images")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageEnabled {
-    Auto,
-    Always,
-    Never,
-}
-
-#[cfg(feature = "images")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageBackend {
-    Auto,
-    Kitty,
-    ITerm2,
-    Sixel,
-    None,
 }
 
 impl Default for Config {
@@ -153,8 +132,7 @@ impl Default for GitConfig {
 impl Default for ImageConfig {
     fn default() -> Self {
         Self {
-            enabled: ImageEnabled::Auto,
-            backend: ImageBackend::Auto,
+            enabled: true,
             max_width_percent: 90,
             max_height_percent: 50,
             allow_remote: false,
@@ -242,7 +220,7 @@ editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: auto\n  backend: auto\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
+            yaml_content.push_str("images:\n  enabled: true\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
         }
 
         let yaml_content = yaml_content;
@@ -276,7 +254,7 @@ editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
         }
 
         if cfg!(feature = "images") {
-            yaml_content.push_str("images:\n  enabled: auto\n  backend: auto\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
+            yaml_content.push_str("images:\n  enabled: true\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
         }
 
         file.write_all(yaml_content.as_bytes())?;
