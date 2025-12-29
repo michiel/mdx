@@ -35,99 +35,115 @@ impl Theme {
         }
     }
 
-    /// Dark theme (default)
+    /// Dark theme (default) - Inspired by One Dark Pro / Nord
     pub fn dark() -> Self {
         Self {
-            base: Style::default().fg(Color::White),
+            base: Style::default().fg(Color::Rgb(220, 220, 220)), // Soft white
             heading: [
+                // H1: Bright blue - highest priority
                 Style::default()
-                    .fg(Color::LightBlue)
+                    .fg(Color::Rgb(97, 175, 239))
                     .add_modifier(Modifier::BOLD),
+                // H2: Cyan - secondary
                 Style::default()
-                    .fg(Color::LightCyan)
+                    .fg(Color::Rgb(86, 182, 194))
                     .add_modifier(Modifier::BOLD),
+                // H3: Green - tertiary
                 Style::default()
-                    .fg(Color::LightGreen)
+                    .fg(Color::Rgb(152, 195, 121))
                     .add_modifier(Modifier::BOLD),
+                // H4: Purple - quaternary
                 Style::default()
-                    .fg(Color::LightYellow)
+                    .fg(Color::Rgb(198, 120, 221))
                     .add_modifier(Modifier::BOLD),
+                // H5: Orange
                 Style::default()
-                    .fg(Color::LightMagenta)
+                    .fg(Color::Rgb(229, 192, 123))
                     .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+                // H6: Muted gray-blue
+                Style::default()
+                    .fg(Color::Rgb(150, 160, 180))
+                    .add_modifier(Modifier::BOLD),
             ],
-            code: Style::default().fg(Color::Yellow),
+            code: Style::default().fg(Color::Rgb(229, 192, 123)), // Warm amber
             link: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(97, 175, 239)) // Bright blue
                 .add_modifier(Modifier::UNDERLINED),
-            quote: Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-            list_marker: Style::default().fg(Color::LightRed),
-            toc_bg: Color::Black,
-            toc_border: Color::DarkGray,
+            quote: Style::default()
+                .fg(Color::Rgb(130, 140, 150)) // Readable gray
+                .add_modifier(Modifier::ITALIC),
+            list_marker: Style::default().fg(Color::Rgb(224, 108, 117)), // Soft red
+            toc_bg: Color::Rgb(30, 30, 30), // Subtle dark background
+            toc_border: Color::Rgb(60, 60, 60), // Visible border
             toc_active: Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightCyan)
+                .fg(Color::Rgb(30, 30, 30))
+                .bg(Color::Rgb(86, 182, 194)) // Cyan highlight
                 .add_modifier(Modifier::BOLD),
-            cursor_line_bg: Color::Rgb(40, 40, 40), // Subtle dark gray
-            status_bar_fg: Color::Black,
-            status_bar_bg: Color::LightBlue,
+            cursor_line_bg: Color::Rgb(45, 48, 55), // Visible but subtle
+            status_bar_fg: Color::Rgb(220, 220, 220),
+            status_bar_bg: Color::Rgb(52, 61, 70), // Muted blue-gray
             #[cfg(feature = "git")]
-            diff_add: Style::default().fg(Color::Green),
+            diff_add: Style::default().fg(Color::Rgb(152, 195, 121)), // Softer green
             #[cfg(feature = "git")]
-            diff_del: Style::default().fg(Color::Red),
+            diff_del: Style::default().fg(Color::Rgb(224, 108, 117)), // Softer red
             #[cfg(feature = "git")]
-            diff_mod: Style::default().fg(Color::Yellow),
+            diff_mod: Style::default().fg(Color::Rgb(229, 192, 123)), // Amber
         }
     }
 
-    /// Light theme
+    /// Light theme - Inspired by GitHub Light / Solarized Light
     pub fn light() -> Self {
         Self {
-            base: Style::default().fg(Color::Black),
+            base: Style::default().fg(Color::Rgb(36, 41, 46)), // Near-black, easier on eyes
             heading: [
+                // H1: Deep blue - highest priority
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::Rgb(3, 102, 214))
                     .add_modifier(Modifier::BOLD),
+                // H2: Teal - secondary
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::Rgb(0, 128, 128))
                     .add_modifier(Modifier::BOLD),
+                // H3: Forest green - tertiary
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::Rgb(34, 134, 58))
                     .add_modifier(Modifier::BOLD),
+                // H4: Purple - quaternary
                 Style::default()
-                    .fg(Color::Rgb(150, 100, 0))
-                    .add_modifier(Modifier::BOLD), // Dark yellow
-                Style::default()
-                    .fg(Color::Magenta)
+                    .fg(Color::Rgb(111, 66, 193))
                     .add_modifier(Modifier::BOLD),
+                // H5: Dark orange
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(Color::Rgb(227, 98, 9))
+                    .add_modifier(Modifier::BOLD),
+                // H6: Dark gray
+                Style::default()
+                    .fg(Color::Rgb(88, 96, 105))
                     .add_modifier(Modifier::BOLD),
             ],
-            code: Style::default().fg(Color::Rgb(150, 75, 0)), // Orange-brown
+            code: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red-brown
             link: Style::default()
-                .fg(Color::Blue)
+                .fg(Color::Rgb(3, 102, 214)) // Deep blue
                 .add_modifier(Modifier::UNDERLINED),
             quote: Style::default()
-                .fg(Color::DarkGray)
+                .fg(Color::Rgb(106, 115, 125)) // Readable medium gray
                 .add_modifier(Modifier::ITALIC),
-            list_marker: Style::default().fg(Color::Red),
-            toc_bg: Color::White,
-            toc_border: Color::Gray,
+            list_marker: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red
+            toc_bg: Color::Rgb(250, 251, 252), // Very light gray, not harsh white
+            toc_border: Color::Rgb(209, 213, 218), // Soft gray border
             toc_active: Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(Color::Rgb(255, 255, 255))
+                .bg(Color::Rgb(3, 102, 214)) // Deep blue highlight
                 .add_modifier(Modifier::BOLD),
-            cursor_line_bg: Color::Rgb(230, 230, 250), // Light lavender
-            status_bar_fg: Color::White,
-            status_bar_bg: Color::Blue,
+            cursor_line_bg: Color::Rgb(240, 246, 252), // Light blue tint
+            status_bar_fg: Color::Rgb(255, 255, 255),
+            status_bar_bg: Color::Rgb(36, 41, 46), // Dark background for contrast
             #[cfg(feature = "git")]
-            diff_add: Style::default().fg(Color::Green),
+            diff_add: Style::default().fg(Color::Rgb(34, 134, 58)), // Forest green
             #[cfg(feature = "git")]
-            diff_del: Style::default().fg(Color::Red),
+            diff_del: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red
             #[cfg(feature = "git")]
-            diff_mod: Style::default().fg(Color::Rgb(150, 100, 0)), // Dark yellow
+            diff_mod: Style::default().fg(Color::Rgb(227, 98, 9)), // Dark orange
         }
     }
 }

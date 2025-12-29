@@ -186,12 +186,17 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     // by quickly scanning lines before the viewport
     let mut in_code_block = false;
     let mut code_block_lang = String::new();
+    let mut code_block_indent = 0; // Track indentation of code block for list items
     for line_idx in 0..scroll.min(line_count) {
         let line_text: String = app.doc.rope.line(line_idx).chunks().collect();
-        if line_text.trim_end().starts_with("```") {
+        let trimmed = line_text.trim_end();
+        let trimmed_start = trimmed.trim_start();
+        if trimmed_start.starts_with("```") {
             if !in_code_block {
-                // Opening fence - extract language
-                let lang = line_text.trim_end()
+                // Opening fence - extract language and indentation
+                let indent = trimmed.len() - trimmed_start.len();
+                code_block_indent = indent;
+                let lang = trimmed_start
                     .strip_prefix("```")
                     .unwrap_or("")
                     .trim();
@@ -204,6 +209,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             in_code_block = !in_code_block;
             if !in_code_block {
                 code_block_lang.clear();
+                code_block_indent = 0;
             }
         }
     }
@@ -216,6 +222,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     // Build only visible lines
     let mut styled_lines: Vec<Line> = Vec::new();
     let mut is_table_row_flags: Vec<bool> = Vec::new();
+    let mut list_item_indents: Vec<Option<usize>> = Vec::new(); // Track list item continuation indent
     // Account for borders (top and bottom borders take 2 lines)
     let content_height = content_area.height.saturating_sub(2) as usize;
     let visible_end = (scroll + content_height).min(line_count);
@@ -257,6 +264,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 for line in table_lines {
                     styled_lines.push(line);
                     is_table_row_flags.push(true);
+                    list_item_indents.push(None); // Tables are not list items
                 }
 
                 line_idx = line_idx.saturating_add(consumed);
@@ -288,6 +296,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 for line in image_lines {
                     styled_lines.push(line);
                     is_table_row_flags.push(false);
+                    list_item_indents.push(None); // Images are not list items
                 }
 
                 line_idx += 1;
@@ -298,11 +307,15 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         // Track if this is a table row (before styling splits the pipes)
         let is_table_row = line_text.contains('|');
 
-        // Check for code block fence markers - skip rendering them
-        if line_text.starts_with("```") {
+        // Check for code block fence markers (including indented ones) - skip rendering them
+        let trimmed = line_text.trim_end();
+        let trimmed_start = trimmed.trim_start();
+        if trimmed_start.starts_with("```") {
             if !in_code_block {
-                // Opening fence - extract language
-                let lang = line_text.strip_prefix("```").unwrap_or("").trim();
+                // Opening fence - extract language and indentation
+                let indent = trimmed.len() - trimmed_start.len();
+                code_block_indent = indent;
+                let lang = trimmed_start.strip_prefix("```").unwrap_or("").trim();
                 code_block_lang = if lang.is_empty() {
                     "plain".to_string()
                 } else {
@@ -312,6 +325,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             } else {
                 // Closing fence - clear language
                 code_block_lang.clear();
+                code_block_indent = 0;
             }
             in_code_block = !in_code_block;
             // Skip this line entirely (don't render fence markers)
@@ -357,7 +371,22 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
         if in_code_block {
             // Inside code block - render with syntax highlighting and different background
-            line_spans.extend(render_code_line(&line_text, &app.theme, search_query.as_deref()));
+            // For indented code blocks (in list items), preserve the indentation
+            if code_block_indent > 0 {
+                // Add the indentation as plain text
+                let indent_str = " ".repeat(code_block_indent);
+                line_spans.push(Span::raw(indent_str));
+
+                // Render the code content (strip the indent from the line)
+                let code_content = if line_text.len() >= code_block_indent {
+                    &line_text[code_block_indent..]
+                } else {
+                    &line_text
+                };
+                line_spans.extend(render_code_line(code_content, &app.theme, search_query.as_deref()));
+            } else {
+                line_spans.extend(render_code_line(&line_text, &app.theme, search_query.as_deref()));
+            }
             is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
@@ -431,8 +460,16 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
         }
 
+        // Detect if this is a list item and calculate continuation indent
+        let list_indent = if !in_code_block {
+            detect_list_item_indent(&line_text)
+        } else {
+            None
+        };
+
         styled_lines.push(line);
         is_table_row_flags.push(is_table_row);
+        list_item_indents.push(list_indent);
         line_idx += 1;
     }
 
@@ -449,7 +486,6 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let content_width = available_width.saturating_sub(content_start);
 
     let mut wrapped_lines: Vec<Line> = Vec::new();
-    let indent_str = " ".repeat(content_start);
 
     for (idx, line) in styled_lines.into_iter().enumerate() {
         // Check if this is a table row - if so, don't wrap it
@@ -460,6 +496,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             wrapped_lines.push(line);
             continue;
         }
+
+        // Check if this is a list item and get the continuation indent
+        let list_continuation_indent = list_item_indents.get(idx).copied().flatten();
 
         // Calculate the visual width of the line
         let mut current_width = 0;
@@ -485,8 +524,11 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
                 // Add indentation for continuation lines
                 if !first_segment {
-                    current_line_spans.push(Span::raw(indent_str.clone()));
-                    current_width = content_start;
+                    // For list items, add extra indent to align with content after marker
+                    let extra_indent = list_continuation_indent.unwrap_or(0);
+                    let total_indent = content_start + extra_indent;
+                    current_line_spans.push(Span::raw(" ".repeat(total_indent)));
+                    current_width = total_indent;
                 }
 
                 // Word-aware wrapping within the span
@@ -495,7 +537,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     let available = if first_segment {
                         available_width - current_width
                     } else {
-                        content_width
+                        // For continuation lines, account for list item indentation
+                        let extra_indent = list_continuation_indent.unwrap_or(0);
+                        content_width.saturating_sub(extra_indent)
                     };
 
                     let remaining_len = remaining.chars().count();
@@ -559,8 +603,11 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
                         wrapped_lines.push(Line::from(current_line_spans.clone()));
                         current_line_spans.clear();
-                        current_line_spans.push(Span::raw(indent_str.clone()));
-                        current_width = content_start;
+                        // For list items, add extra indent to align with content after marker
+                        let extra_indent = list_continuation_indent.unwrap_or(0);
+                        let total_indent = content_start + extra_indent;
+                        current_line_spans.push(Span::raw(" ".repeat(total_indent)));
+                        current_width = total_indent;
                         remaining = rest;
                         first_segment = false;
                     }
@@ -1246,6 +1293,33 @@ fn render_table_block(
 }
 
 /// Style a single line of markdown text
+/// Detect if a line is a list item and calculate the indent for continuation lines
+/// Returns Some(indent_width) if it's a list item, None otherwise
+fn detect_list_item_indent(line: &str) -> Option<usize> {
+    let trimmed_start = line.trim_start();
+    let leading_spaces = line.len() - trimmed_start.len();
+
+    // Check for unordered list (-, *, +)
+    if let Some(_rest) = trimmed_start.strip_prefix("- ") {
+        return Some(leading_spaces + 2); // "- " is 2 chars
+    } else if let Some(_rest) = trimmed_start.strip_prefix("* ") {
+        return Some(leading_spaces + 2); // "* " is 2 chars
+    } else if let Some(_rest) = trimmed_start.strip_prefix("+ ") {
+        return Some(leading_spaces + 2); // "+ " is 2 chars
+    }
+
+    // Check for ordered list (number followed by . or ))
+    if let Some(pos) = trimmed_start.find(|c| c == '.' || c == ')') {
+        let prefix = &trimmed_start[..pos];
+        if prefix.chars().all(|c| c.is_ascii_digit()) && trimmed_start.len() > pos + 1 {
+            // Marker is like "1. " or "1) " - pos + 2 chars
+            return Some(leading_spaces + pos + 2);
+        }
+    }
+
+    None
+}
+
 fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
