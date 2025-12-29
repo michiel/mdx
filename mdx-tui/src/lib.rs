@@ -27,6 +27,8 @@ pub mod diff_worker;
 pub mod image_cache;
 #[cfg(feature = "images")]
 pub mod image_backend;
+#[cfg(feature = "images")]
+pub mod kitty_graphics;
 
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyEventKind};

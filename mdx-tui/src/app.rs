@@ -66,6 +66,8 @@ pub struct App {
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
     pub diff_worker: crate::diff_worker::DiffWorker,
+    #[cfg(feature = "images")]
+    pub image_cache: crate::image_cache::ImageCache,
 }
 
 impl App {
@@ -122,6 +124,8 @@ impl App {
             watcher,
             #[cfg(feature = "git")]
             diff_worker,
+            #[cfg(feature = "images")]
+            image_cache: crate::image_cache::ImageCache::default(),
         }
     }
 
