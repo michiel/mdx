@@ -1822,34 +1822,197 @@ fn try_load_image(
 /// Render a decoded image using the appropriate backend
 #[cfg(feature = "images")]
 fn render_decoded_image(
-    _decoded: crate::image_cache::DecodedImage,
-    _content_area: ratatui::layout::Rect,
-    _source_line: usize,
+    decoded: crate::image_cache::DecodedImage,
+    content_area: ratatui::layout::Rect,
+    source_line: usize,
     image: &mdx_core::image::ImageNode,
+    line_num_width: usize,
+    is_focused: bool,
+    cursor: usize,
+    selection_range: Option<(usize, usize)>,
+    left_margin_width: u16,
+    backend: mdx_core::config::ImageBackend,
+) -> (Vec<Line<'static>>, usize) {
+    use mdx_core::config::ImageBackend;
+
+    // Calculate display dimensions in terminal cells
+    let content_height = content_area.height.saturating_sub(2) as u16;
+
+    // Terminal cells are roughly 2:1 aspect ratio (width:height in pixels)
+    // So to maintain aspect ratio, we need height_cells ≈ pixel_height / (2 * pixel_width) * width_cells
+    let aspect_ratio = decoded.height as f32 / decoded.width as f32;
+    let max_width = content_area.width.saturating_sub(left_margin_width).saturating_sub(5) as u32;
+    let width_cells = (decoded.width / 10).min(max_width) as u16;
+    let height_cells = ((width_cells as f32 * aspect_ratio) / 2.0).ceil() as u16;
+    let height_cells = height_cells.min(content_height).max(1);
+
+    // Generate terminal graphics escape sequences
+    let graphics_result = match backend {
+        ImageBackend::Kitty => render_kitty_image(&decoded, width_cells, height_cells, source_line),
+        ImageBackend::ITerm2 => render_iterm2_image(&decoded, width_cells, height_cells),
+        ImageBackend::Sixel => render_sixel_image(&decoded, width_cells, height_cells),
+        ImageBackend::None | ImageBackend::Auto => {
+            // Fallback to placeholder
+            return render_image_placeholder_simple(image, height_cells as usize, source_line, line_num_width, is_focused, cursor, selection_range, left_margin_width);
+        }
+    };
+
+    match graphics_result {
+        Ok(lines) => (lines, 1),
+        Err(_) => {
+            // On error, show placeholder
+            render_image_placeholder_simple(image, height_cells as usize, source_line, line_num_width, is_focused, cursor, selection_range, left_margin_width)
+        }
+    }
+}
+
+/// Render image using Kitty graphics protocol
+#[cfg(feature = "images")]
+fn render_kitty_image(
+    decoded: &crate::image_cache::DecodedImage,
+    _width_cells: u16,
+    height_cells: u16,
+    image_id: usize,
+) -> anyhow::Result<Vec<Line<'static>>> {
+    use std::io::Write;
+
+    // Generate unique image ID based on line number
+    let id = image_id as u32;
+
+    // Transmit image data
+    let transmit_seq = crate::kitty_graphics::transmit_image(
+        &decoded.data,
+        decoded.width,
+        decoded.height,
+        id,
+    )?;
+
+    // Display image
+    let display_seq = crate::kitty_graphics::display_image(
+        id,
+        height_cells,
+        decoded.width as u16,
+    )?;
+
+    // Combine sequences
+    let mut combined = Vec::new();
+    combined.write_all(&transmit_seq)?;
+    combined.write_all(&display_seq)?;
+
+    // Convert to string and create a single line with escape sequences
+    let escape_str = String::from_utf8_lossy(&combined).to_string();
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::raw(escape_str)));
+
+    // Add empty lines for vertical spacing
+    for _ in 1..height_cells {
+        lines.push(Line::from(Span::raw("")));
+    }
+
+    Ok(lines)
+}
+
+/// Render image using iTerm2 inline images protocol
+#[cfg(feature = "images")]
+fn render_iterm2_image(
+    decoded: &crate::image_cache::DecodedImage,
+    width_cells: u16,
+    height_cells: u16,
+) -> anyhow::Result<Vec<Line<'static>>> {
+    // First encode RGBA as PNG
+    let png_data = crate::iterm2_graphics::encode_rgba_as_png(
+        &decoded.data,
+        decoded.width,
+        decoded.height,
+    )?;
+
+    // Display image
+    let display_seq = crate::iterm2_graphics::display_image(
+        &png_data,
+        width_cells,
+        height_cells,
+    )?;
+
+    let escape_str = String::from_utf8_lossy(&display_seq).to_string();
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::raw(escape_str)));
+
+    // Add empty lines for vertical spacing
+    for _ in 1..height_cells {
+        lines.push(Line::from(Span::raw("")));
+    }
+
+    Ok(lines)
+}
+
+/// Render image using Sixel graphics protocol
+#[cfg(feature = "images")]
+fn render_sixel_image(
+    decoded: &crate::image_cache::DecodedImage,
+    _width_cells: u16,
+    height_cells: u16,
+) -> anyhow::Result<Vec<Line<'static>>> {
+    // Encode as Sixel
+    let sixel_data = crate::sixel_graphics::encode_sixel(
+        &decoded.data,
+        decoded.width,
+        decoded.height,
+    )?;
+
+    let escape_str = String::from_utf8_lossy(&sixel_data).to_string();
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::raw(escape_str)));
+
+    // Add empty lines for vertical spacing
+    for _ in 1..height_cells {
+        lines.push(Line::from(Span::raw("")));
+    }
+
+    Ok(lines)
+}
+
+/// Simple placeholder rendering for error cases
+#[cfg(feature = "images")]
+fn render_image_placeholder_simple(
+    image: &mdx_core::image::ImageNode,
+    height: usize,
+    _source_line: usize,
     _line_num_width: usize,
     _is_focused: bool,
     _cursor: usize,
     _selection_range: Option<(usize, usize)>,
     _left_margin_width: u16,
-    _backend: mdx_core::config::ImageBackend,
 ) -> (Vec<Line<'static>>, usize) {
-    // For now, just show that we loaded it successfully
-    // TODO: Actually render using Kitty/iTerm2/Sixel protocols
-    let mut rendered: Vec<Line> = Vec::new();
+    let mut lines = Vec::new();
 
     let alt_text = if image.alt.is_empty() {
-        "Image loaded"
+        "Image"
     } else {
         &image.alt
     };
-    let status_text = format!("[✓ Loaded: {}]", alt_text);
 
-    rendered.push(Line::from(Span::styled(
-        status_text,
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-    )));
+    // Show placeholder for calculated height
+    for i in 0..height.max(1) {
+        if i == height / 2 {
+            // Center line with text
+            let text = format!("[Image: {}]", alt_text);
+            lines.push(Line::from(Span::styled(
+                text,
+                Style::default().fg(Color::Cyan).bg(Color::Rgb(50, 50, 50))
+            )));
+        } else {
+            // Empty placeholder line
+            lines.push(Line::from(Span::styled(
+                " ".repeat(30),
+                Style::default().bg(Color::Rgb(50, 50, 50))
+            )));
+        }
+    }
 
-    (rendered, 1)
+    (lines, 1)
 }
 
 /// Render image placeholder when image cannot be loaded
