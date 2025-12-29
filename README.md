@@ -28,9 +28,27 @@ A fast, terminal-based Markdown viewer and editor launcher built in Rust. Design
 
 ## Installation
 
+### Quick Install (Recommended)
+
+**Linux/macOS** (one-line install):
+```bash
+curl -fsSL https://raw.githubusercontent.com/michiel/mdx/main/scripts/install.sh | bash
+```
+
+**Windows** (PowerShell):
+```powershell
+iwr -useb https://raw.githubusercontent.com/michiel/mdx/main/scripts/install.ps1 | iex
+```
+
+The installer will:
+- Detect your platform and architecture automatically
+- Download the latest release from GitHub
+- Install to `~/.local/bin` (Linux/macOS) or `%LOCALAPPDATA%\mdx` (Windows)
+- Add to PATH if needed
+
 ### Pre-built Binaries
 
-Download pre-built binaries from the [releases page](https://github.com/soof-golan/mdx/releases):
+Alternatively, download pre-built binaries manually from the [releases page](https://github.com/michiel/mdx/releases):
 
 - **Linux x86_64**: `mdx-linux-x86_64`
 - **Linux ARM64**: `mdx-linux-aarch64`
