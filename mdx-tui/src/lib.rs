@@ -23,6 +23,8 @@ pub mod ui;
 pub mod watcher;
 #[cfg(feature = "git")]
 pub mod diff_worker;
+#[cfg(feature = "images")]
+pub mod image_cache;
 
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyEventKind};

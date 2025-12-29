@@ -11,7 +11,7 @@ default = ["clipboard", "watch", "git"]
 clipboard = ["mdx-core/clipboard", "dep:arboard"]
 watch = ["mdx-core/watch", "dep:notify"]
 git = ["mdx-core/git"]
-images = ["mdx-core/images"]
+images = ["mdx-core/images", "dep:image", "dep:blake3"]
 
 [dependencies]
 # Core crate
@@ -38,6 +38,10 @@ arboard = { workspace = true, optional = true }
 
 # File watching (optional)
 notify = { workspace = true, optional = true }
+
+# Image decoding (optional)
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+blake3 = { version = "1.5", optional = true }
 
 [dev-dependencies]
 tempfile = "3.14"
