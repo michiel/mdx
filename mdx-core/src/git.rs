@@ -45,11 +45,53 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     }
     let rel_path = rel_path.unwrap().to_path_buf();
 
+    // Check if file is gitignored
+    if is_path_ignored(&repo, &rel_path) {
+        return Ok(None);
+    }
+
     Ok(Some(RepoContext {
         repo,
         workdir,
         rel_path,
     }))
+}
+
+/// Check if a path is ignored by git
+#[cfg(feature = "git")]
+fn is_path_ignored(repo: &gix::Repository, rel_path: &Path) -> bool {
+    use bstr::ByteSlice;
+
+    // First check if path is in index (tracked files can't be ignored)
+    if let Ok(index) = repo.index() {
+        // Convert Path to BStr for gix API
+        let path_str = rel_path.to_string_lossy();
+        let path_bytes = path_str.as_bytes();
+        if index.entry_by_path(path_bytes.as_bstr()).is_some() {
+            // File is tracked, so not ignored
+            return false;
+        }
+    }
+
+    // For untracked files, use git check-ignore command as reliable method
+    if let Some(workdir) = repo.work_dir() {
+        let full_path = workdir.join(rel_path);
+
+        // Run git check-ignore on the file
+        let output = Command::new("git")
+            .arg("check-ignore")
+            .arg("-q")
+            .arg(&full_path)
+            .current_dir(workdir)
+            .output();
+
+        if let Ok(output) = output {
+            // Exit code 0 means the file is ignored
+            return output.status.success();
+        }
+    }
+
+    false
 }
 
 #[cfg(not(feature = "git"))]
