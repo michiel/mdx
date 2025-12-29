@@ -227,17 +227,25 @@ mod tests {
     #[test]
     fn test_load_valid_yaml() -> Result<()> {
         let mut file = NamedTempFile::new()?;
-        let yaml_content = if cfg!(feature = "watch") && cfg!(feature = "git") {
-            "theme: Light\n\
-toc:\n  enabled: false\n  side: Right\n  width: 40\n\
-editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n\
-watch:\n  enabled: true\n  auto_reload: false\n\
-git:\n  diff: true\n  base: Head\n"
-        } else {
+        let mut yaml_content = String::from(
             "theme: Light\n\
 toc:\n  enabled: false\n  side: Right\n  width: 40\n\
 editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
-        };
+        );
+
+        if cfg!(feature = "watch") {
+            yaml_content.push_str("watch:\n  enabled: true\n  auto_reload: false\n");
+        }
+
+        if cfg!(feature = "git") {
+            yaml_content.push_str("git:\n  diff: true\n  base: Head\n");
+        }
+
+        if cfg!(feature = "images") {
+            yaml_content.push_str("images:\n  enabled: auto\n  backend: auto\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
+        }
+
+        let yaml_content = yaml_content;
         file.write_all(yaml_content.as_bytes())?;
 
         let config = Config::load_from(file.path())?;
@@ -253,17 +261,24 @@ editor:\n  command: nvim\n  args: [\"+{line}\", \"{file}\"]\n"
     #[test]
     fn test_load_partial_yaml() -> Result<()> {
         let mut file = NamedTempFile::new()?;
-        let yaml_content = if cfg!(feature = "watch") && cfg!(feature = "git") {
-            "theme: Light\n\
-toc:\n  enabled: true\n  side: Left\n  width: 32\n\
-editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n\
-watch:\n  enabled: true\n  auto_reload: false\n\
-git:\n  diff: true\n  base: Head\n"
-        } else {
+        let mut yaml_content = String::from(
             "theme: Light\n\
 toc:\n  enabled: true\n  side: Left\n  width: 32\n\
 editor:\n  command: \"$EDITOR\"\n  args: [\"+{line}\", \"{file}\"]\n"
-        };
+        );
+
+        if cfg!(feature = "watch") {
+            yaml_content.push_str("watch:\n  enabled: true\n  auto_reload: false\n");
+        }
+
+        if cfg!(feature = "git") {
+            yaml_content.push_str("git:\n  diff: true\n  base: Head\n");
+        }
+
+        if cfg!(feature = "images") {
+            yaml_content.push_str("images:\n  enabled: auto\n  backend: auto\n  max_width_percent: 90\n  max_height_percent: 50\n  allow_remote: false\n");
+        }
+
         file.write_all(yaml_content.as_bytes())?;
 
         let config = Config::load_from(file.path())?;

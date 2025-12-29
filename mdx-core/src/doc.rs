@@ -11,6 +11,9 @@ use crate::toc;
 #[cfg(feature = "git")]
 use crate::diff::DiffGutter;
 
+#[cfg(feature = "images")]
+use crate::image::ImageNode;
+
 /// A heading in the markdown document
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heading {
@@ -32,6 +35,8 @@ pub struct Document {
     pub rev: u64,
     #[cfg(feature = "git")]
     pub diff_gutter: DiffGutter,
+    #[cfg(feature = "images")]
+    pub images: Vec<ImageNode>,
 }
 
 impl Document {
@@ -57,6 +62,10 @@ impl Document {
             DiffGutter::empty(line_count)
         };
 
+        // Initialize with empty images vector - will be extracted in Stage 2
+        #[cfg(feature = "images")]
+        let images = Vec::new();
+
         Ok(Self {
             path: abs_path,
             rope,
@@ -67,6 +76,8 @@ impl Document {
             rev: 1,
             #[cfg(feature = "git")]
             diff_gutter,
+            #[cfg(feature = "images")]
+            images,
         })
     }
 
@@ -91,6 +102,12 @@ impl Document {
         {
             let line_count = self.rope.len_lines();
             self.diff_gutter = DiffGutter::empty(line_count);
+        }
+
+        // Reset images vector - will be extracted in Stage 2
+        #[cfg(feature = "images")]
+        {
+            self.images.clear();
         }
 
         Ok(())
