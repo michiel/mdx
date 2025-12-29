@@ -1751,6 +1751,7 @@ fn render_image(
         Ok(Some(decoded)) => {
             // Successfully loaded - render based on backend
             render_decoded_image(
+                app,
                 decoded,
                 content_area,
                 source_line,
@@ -1822,6 +1823,7 @@ fn try_load_image(
 /// Render a decoded image using the appropriate backend
 #[cfg(feature = "images")]
 fn render_decoded_image(
+    app: &App,
     decoded: crate::image_cache::DecodedImage,
     content_area: ratatui::layout::Rect,
     source_line: usize,
@@ -1853,6 +1855,7 @@ fn render_decoded_image(
 
     // Show informative placeholder with image details
     render_image_info_placeholder(
+        app,
         image,
         &decoded,
         height_cells as usize,
@@ -1977,15 +1980,16 @@ fn render_sixel_image(
 /// Render placeholder with image information
 #[cfg(feature = "images")]
 fn render_image_info_placeholder(
+    app: &App,
     image: &mdx_core::image::ImageNode,
     decoded: &crate::image_cache::DecodedImage,
     height: usize,
     backend: mdx_core::config::ImageBackend,
-    _source_line: usize,
-    _line_num_width: usize,
-    _is_focused: bool,
-    _cursor: usize,
-    _selection_range: Option<(usize, usize)>,
+    source_line: usize,
+    line_num_width: usize,
+    is_focused: bool,
+    cursor: usize,
+    selection_range: Option<(usize, usize)>,
     _left_margin_width: u16,
 ) -> (Vec<Line<'static>>, usize) {
     let mut lines = Vec::new();
@@ -2012,32 +2016,92 @@ fn render_image_info_placeholder(
         backend_name
     );
 
+    // Check if this line is selected
+    let is_selected = if let Some((start, end)) = selection_range {
+        source_line >= start && source_line <= end
+    } else {
+        false
+    };
+
     // Show informative placeholder for calculated height
     let display_height = height.max(3);
     for i in 0..display_height {
+        let mut line_spans: Vec<Span> = Vec::new();
+
+        // Only show line number and gutter on first line
+        if i == 0 {
+            // Line number
+            let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
+            let line_num_color = if is_focused && source_line == cursor {
+                Color::White
+            } else {
+                Color::DarkGray
+            };
+            line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+
+            // Git diff gutter
+            #[cfg(feature = "git")]
+            if app.config.git.diff {
+                use mdx_core::diff::DiffMark;
+                let gutter = match app.doc.diff_gutter.get(source_line) {
+                    DiffMark::None => "  ",
+                    DiffMark::Added => "│ ",
+                    DiffMark::Modified => "│ ",
+                    DiffMark::DeletedAfter(_) => "│ ",
+                };
+                let gutter_color = match app.doc.diff_gutter.get(source_line) {
+                    DiffMark::None => Color::DarkGray,
+                    DiffMark::Added => Color::Green,
+                    DiffMark::Modified => Color::Yellow,
+                    DiffMark::DeletedAfter(_) => Color::Red,
+                };
+                line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+            } else {
+                line_spans.push(Span::raw("  "));
+            }
+            #[cfg(not(feature = "git"))]
+            line_spans.push(Span::raw("  "));
+        } else {
+            // Continuation lines - just indent
+            let indent_width = line_num_width + 2; // line number + gutter
+            line_spans.push(Span::raw(" ".repeat(indent_width + 1)));
+        }
+
+        // Add placeholder content
         if i == display_height / 2 {
             // Center line with info
-            lines.push(Line::from(Span::styled(
+            line_spans.push(Span::styled(
                 info_text.clone(),
                 Style::default()
                     .fg(Color::Rgb(100, 200, 255))
                     .bg(Color::Rgb(30, 40, 50))
                     .add_modifier(Modifier::BOLD)
-            )));
+            ));
         } else if i == 0 || i == display_height - 1 {
             // Border lines
             let border = "─".repeat(info_text.len().min(60));
-            lines.push(Line::from(Span::styled(
+            line_spans.push(Span::styled(
                 border,
                 Style::default().fg(Color::Rgb(60, 80, 100)).bg(Color::Rgb(20, 25, 30))
-            )));
+            ));
         } else {
             // Empty placeholder line
-            lines.push(Line::from(Span::styled(
+            line_spans.push(Span::styled(
                 " ".repeat(info_text.len().min(60)),
                 Style::default().bg(Color::Rgb(20, 25, 30))
-            )));
+            ));
         }
+
+        let mut line = Line::from(line_spans);
+
+        // Apply highlighting if this is the cursor or selected line
+        if is_focused && is_selected {
+            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        } else if is_focused && source_line == cursor {
+            line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
+        }
+
+        lines.push(line);
     }
 
     (lines, 1)
