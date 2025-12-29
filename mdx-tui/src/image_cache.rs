@@ -11,7 +11,7 @@ use std::path::Path;
 /// Cache key for decoded images
 #[derive(Hash, PartialEq, Eq, Clone, Debug)]
 pub struct ImageCacheKey {
-    /// Blake3 hash of file path + mtime
+    /// Blake3 hash of file path/URL + mtime/timestamp
     pub hash: [u8; 32],
 }
 
@@ -37,6 +37,19 @@ impl ImageCacheKey {
         Some(Self {
             hash: *hash.as_bytes(),
         })
+    }
+
+    /// Create cache key from URL
+    pub fn from_url(url: &str) -> Self {
+        // For URLs, just hash the URL itself
+        // We don't track remote modification times
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(url.as_bytes());
+
+        let hash = hasher.finalize();
+        Self {
+            hash: *hash.as_bytes(),
+        }
     }
 }
 
@@ -103,9 +116,14 @@ impl DecodedImage {
         // Read SVG file
         let svg_data = fs::read(path)?;
 
+        Self::from_svg_data(&svg_data, max_width, max_height)
+    }
+
+    /// Decode SVG from data bytes
+    fn from_svg_data(svg_data: &[u8], max_width: u32, max_height: u32) -> anyhow::Result<Self> {
         // Parse SVG
         let opt = resvg::usvg::Options::default();
-        let tree = resvg::usvg::Tree::from_data(&svg_data, &opt)?;
+        let tree = resvg::usvg::Tree::from_data(svg_data, &opt)?;
 
         // Get SVG dimensions
         let svg_size = tree.size();
@@ -134,6 +152,62 @@ impl DecodedImage {
 
         // Convert to RGBA
         let data = pixmap.take();
+
+        Ok(Self {
+            width,
+            height,
+            data,
+        })
+    }
+
+    /// Decode image from URL with size constraints
+    pub fn from_url(url: &str, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
+        // Download image data
+        let response = reqwest::blocking::get(url)?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
+        }
+
+        // Extract content type as owned String to avoid borrow issues
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
+        let image_data = response.bytes()?;
+
+        // Check if SVG based on content type or URL
+        if content_type.contains("svg") || url.ends_with(".svg") {
+            return Self::from_svg_data(&image_data, max_width, max_height);
+        }
+
+        // Decode as raster image
+        use image::GenericImageView;
+
+        let img = image::load_from_memory(&image_data)?;
+        let (orig_width, orig_height) = img.dimensions();
+
+        // Calculate scaled dimensions
+        let (width, height) = calculate_scaled_dimensions(
+            orig_width,
+            orig_height,
+            max_width,
+            max_height,
+        );
+
+        // Resize if needed
+        let resized = if width != orig_width || height != orig_height {
+            img.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
+        } else {
+            img
+        };
+
+        // Convert to RGBA
+        let rgba = resized.to_rgba8();
+        let data = rgba.into_raw();
 
         Ok(Self {
             width,
@@ -181,7 +255,7 @@ impl ImageCache {
         }
     }
 
-    /// Get cached image or decode and cache it
+    /// Get cached image or decode and cache it from file path
     pub fn get_or_decode(
         &mut self,
         path: &Path,
@@ -199,6 +273,30 @@ impl ImageCache {
 
         // Decode image
         let decoded = DecodedImage::from_path(path, max_width, max_height)?;
+
+        // Store in cache
+        self.cache.put(key, decoded.clone());
+
+        Ok(decoded)
+    }
+
+    /// Get cached image or fetch and decode from URL
+    pub fn get_or_fetch(
+        &mut self,
+        url: &str,
+        max_width: u32,
+        max_height: u32,
+    ) -> anyhow::Result<DecodedImage> {
+        // Generate cache key from URL
+        let key = ImageCacheKey::from_url(url);
+
+        // Check cache first
+        if let Some(cached) = self.cache.get(&key) {
+            return Ok(cached.clone());
+        }
+
+        // Fetch and decode image
+        let decoded = DecodedImage::from_url(url, max_width, max_height)?;
 
         // Store in cache
         self.cache.put(key, decoded.clone());
