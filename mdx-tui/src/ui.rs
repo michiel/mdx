@@ -413,21 +413,21 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     let padding_before = " ".repeat(remaining_width - lang_width);
                     line_spans.push(Span::styled(
                         padding_before,
-                        Style::default().bg(Color::Rgb(40, 44, 52))
+                        Style::default().bg(app.theme.code_block_bg)
                     ));
                     // Add the language label
                     line_spans.push(Span::styled(
                         lang_label,
                         Style::default()
                             .fg(Color::Rgb(120, 120, 120))
-                            .bg(Color::Rgb(40, 44, 52))
+                            .bg(app.theme.code_block_bg)
                     ));
                 } else {
                     // Not enough space for label, just pad
                     let padding = " ".repeat(remaining_width);
                     line_spans.push(Span::styled(
                         padding,
-                        Style::default().bg(Color::Rgb(40, 44, 52))
+                        Style::default().bg(app.theme.code_block_bg)
                     ));
                 }
                 is_first_code_line = false;
@@ -436,7 +436,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 let padding = " ".repeat(available_width - line_visual_width);
                 line_spans.push(Span::styled(
                     padding,
-                    Style::default().bg(Color::Rgb(40, 44, 52))
+                    Style::default().bg(app.theme.code_block_bg)
                 ));
             }
         }
@@ -457,7 +457,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             line = line.style(Style::default().bg(app.theme.cursor_line_bg));
         } else if is_code_block_line {
             // Apply code block background to entire line
-            line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
+            line = line.style(Style::default().bg(app.theme.code_block_bg));
         }
 
         // Detect if this is a list item and calculate continuation indent
@@ -820,8 +820,8 @@ fn render_raw_text(
 
 /// Render a code block line with syntax highlighting
 fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
-    // Code block background color
-    let code_bg = Color::Rgb(40, 44, 52); // Slightly darker background for code
+    // Code block background color from theme
+    let code_bg = theme.code_block_bg;
 
     // Define syntax highlighting colors
     let keyword_color = Color::Rgb(198, 120, 221); // Purple for keywords
@@ -2027,7 +2027,7 @@ fn render_image_info_placeholder(
     if is_focused && is_selected {
         line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
+        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
     }
 
     lines.push(line);
@@ -2116,7 +2116,7 @@ fn render_image_placeholder(
     if is_focused && is_selected {
         line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
+        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
     }
 
     lines.push(line);
