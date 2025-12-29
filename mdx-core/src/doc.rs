@@ -62,9 +62,9 @@ impl Document {
             DiffGutter::empty(line_count)
         };
 
-        // Initialize with empty images vector - will be extracted in Stage 2
+        // Extract images from Markdown
         #[cfg(feature = "images")]
-        let images = Vec::new();
+        let images = extract_images(&rope);
 
         Ok(Self {
             path: abs_path,
@@ -104,10 +104,10 @@ impl Document {
             self.diff_gutter = DiffGutter::empty(line_count);
         }
 
-        // Reset images vector - will be extracted in Stage 2
+        // Re-extract images from Markdown
         #[cfg(feature = "images")]
         {
-            self.images.clear();
+            self.images = extract_images(&self.rope);
         }
 
         Ok(())
@@ -148,6 +148,63 @@ impl Document {
 
         result
     }
+}
+
+/// Extract images from Markdown text
+#[cfg(feature = "images")]
+fn extract_images(rope: &Rope) -> Vec<ImageNode> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+    let text: String = rope.chunks().collect();
+    let parser = Parser::new(&text);
+    let parser_with_offsets = parser.into_offset_iter();
+
+    let mut images = Vec::new();
+    let mut in_image = false;
+    let mut current_alt = String::new();
+
+    for (event, range) in parser_with_offsets {
+        match event {
+            Event::Start(Tag::Image { link_type: _, ref dest_url, ref title, id: _ }) => {
+                // Start of image tag
+                in_image = true;
+                current_alt.clear();
+
+                // Find line number for this byte offset
+                let byte_offset = range.start.min(rope.len_bytes().saturating_sub(1));
+                let current_line = rope.byte_to_line(byte_offset);
+
+                // Create image node (will update alt text in Text event)
+                let mut img = ImageNode::new(
+                    dest_url.to_string(),
+                    String::new(),
+                    current_line,
+                );
+
+                if !title.is_empty() {
+                    img.title = Some(title.to_string());
+                }
+
+                // Store temporarily (will be updated with alt text)
+                images.push(img);
+            }
+            Event::Text(ref text) if in_image => {
+                // Capture alt text
+                current_alt.push_str(text);
+            }
+            Event::End(TagEnd::Image) => {
+                // End of image tag - update the last image with alt text
+                if let Some(last_img) = images.last_mut() {
+                    last_img.alt = current_alt.clone();
+                }
+                in_image = false;
+                current_alt.clear();
+            }
+            _ => {}
+        }
+    }
+
+    images
 }
 
 #[cfg(test)]
@@ -236,6 +293,126 @@ mod tests {
         let result = doc.get_lines(0, 100);
         assert!(result.contains("Line 1"));
         assert!(result.contains("Line 2"));
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_basic() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"# Heading\n\n![alt text](image.png)\n\nSome text\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 1);
+        assert_eq!(doc.images[0].src, "image.png");
+        assert_eq!(doc.images[0].alt, "alt text");
+        assert_eq!(doc.images[0].title, None);
+        assert_eq!(doc.images[0].source_line, 2);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_with_title() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"![alt text](image.png \"Image Title\")\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 1);
+        assert_eq!(doc.images[0].src, "image.png");
+        assert_eq!(doc.images[0].alt, "alt text");
+        assert_eq!(doc.images[0].title, Some("Image Title".to_string()));
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_empty_alt() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"![](image.png)\n")?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 1);
+        assert_eq!(doc.images[0].src, "image.png");
+        assert_eq!(doc.images[0].alt, "");
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_line_numbers() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(
+            b"Line 1\nLine 2\n![first](a.png)\nLine 4\nLine 5\n![second](b.png)\nLine 7\n",
+        )?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 2);
+        assert_eq!(doc.images[0].source_line, 2);
+        assert_eq!(doc.images[1].source_line, 5);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_multiple() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(
+            b"# Document\n\n![first](a.png)\n\nSome text\n\n![second](b.png)\n\n![third](c.png)\n",
+        )?;
+
+        let doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 3);
+        assert_eq!(doc.images[0].src, "a.png");
+        assert_eq!(doc.images[0].alt, "first");
+        assert_eq!(doc.images[1].src, "b.png");
+        assert_eq!(doc.images[1].alt, "second");
+        assert_eq!(doc.images[2].src, "c.png");
+        assert_eq!(doc.images[2].alt, "third");
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_in_code_blocks() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(
+            b"![real image](real.png)\n\n```markdown\n![fake image](fake.png)\n```\n\n![another real](real2.png)\n",
+        )?;
+
+        let doc = Document::load(file.path())?;
+        // Code block images should be ignored by pulldown_cmark
+        assert_eq!(doc.images.len(), 2);
+        assert_eq!(doc.images[0].src, "real.png");
+        assert_eq!(doc.images[1].src, "real2.png");
+
+        Ok(())
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_extract_images_reload_updates() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(b"![initial](initial.png)\n")?;
+        file.flush()?;
+
+        let mut doc = Document::load(file.path())?;
+        assert_eq!(doc.images.len(), 1);
+        assert_eq!(doc.images[0].src, "initial.png");
+
+        // Modify file with different images
+        std::fs::write(file.path(), b"![new](new.png)\n![another](another.png)\n")?;
+
+        doc.reload()?;
+        assert_eq!(doc.images.len(), 2);
+        assert_eq!(doc.images[0].src, "new.png");
+        assert_eq!(doc.images[1].src, "another.png");
 
         Ok(())
     }
