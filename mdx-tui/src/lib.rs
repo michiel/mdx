@@ -50,8 +50,11 @@ pub fn run(mut app: App) -> Result<()> {
 fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
     loop {
         // Get terminal size for viewport calculations
+        let term_size = terminal.size()?;
         // -1 for status bar, -2 for pane borders (top and bottom)
-        let viewport_height = terminal.size()?.height.saturating_sub(3) as usize;
+        let viewport_height = term_size.height.saturating_sub(3) as usize;
+        // -2 for pane borders (left and right)
+        let viewport_width = term_size.width.saturating_sub(2) as usize;
 
         // Draw UI
         terminal
@@ -68,7 +71,7 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
             if let Event::Key(key) = crossterm::event::read().context("Failed to read event")? {
                 // Only handle key press events, ignore release
                 if key.kind == KeyEventKind::Press {
-                    let action = input::handle_input(app, key, viewport_height)?;
+                    let action = input::handle_input(app, key, viewport_height, viewport_width)?;
 
                     // Handle special actions
                     match action {

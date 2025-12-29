@@ -13,8 +13,8 @@ pub enum Action {
     OpenEditor,
 }
 
-/// Handle a key event with viewport height for scroll commands
-pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Result<Action> {
+/// Handle a key event with viewport dimensions for scroll commands
+pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewport_width: usize) -> Result<Action> {
     // Handle close pane with 'q' - quit if last pane
     if matches!(
         key,
@@ -764,7 +764,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.scroll_half_page_down(viewport_height);
+            app.scroll_half_page_down(viewport_height, viewport_width);
             app.auto_scroll(viewport_height);
         }
 
@@ -774,7 +774,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize) -> Res
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.scroll_half_page_up(viewport_height);
+            app.scroll_half_page_up(viewport_height, viewport_width);
             app.auto_scroll(viewport_height);
         }
 

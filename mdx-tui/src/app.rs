@@ -187,16 +187,76 @@ impl App {
         self.update_selection();
     }
 
-    /// Scroll down by half viewport height
-    pub fn scroll_half_page_down(&mut self, viewport_height: usize) {
-        let half_page = viewport_height / 2;
-        self.move_cursor_down(half_page);
+    /// Calculate how many source lines to move for a given visual line count
+    /// This accounts for line wrapping by estimating wrapped lines
+    fn calculate_source_lines_for_visual_lines(&self, visual_lines: usize, viewport_width: usize, forward: bool) -> usize {
+        if let Some(pane) = self.panes.focused_pane() {
+            let start_line = if forward {
+                pane.view.cursor_line
+            } else {
+                pane.view.cursor_line.saturating_sub(visual_lines)
+            };
+
+            // Estimate content width (viewport width minus margins)
+            let content_width = viewport_width.saturating_sub(10); // Rough estimate for line numbers + gutters
+
+            if content_width < 40 {
+                // Very narrow viewport, fallback to 1:1 mapping
+                return visual_lines;
+            }
+
+            let mut visual_count = 0;
+            let mut source_count = 0;
+            let line_count = self.doc.line_count();
+
+            while visual_count < visual_lines && start_line + source_count < line_count {
+                let line_idx = if forward {
+                    start_line + source_count
+                } else {
+                    start_line.saturating_sub(source_count).min(start_line)
+                };
+
+                if line_idx >= line_count {
+                    break;
+                }
+
+                // Get line length
+                let line_text: String = self.doc.rope.line(line_idx).chars().collect();
+                let line_len = line_text.chars().count();
+
+                // Estimate wrapped lines (simple heuristic)
+                let wrapped_lines = if line_len == 0 {
+                    1
+                } else {
+                    ((line_len + content_width - 1) / content_width).max(1)
+                };
+
+                visual_count += wrapped_lines;
+                source_count += 1;
+
+                if visual_count >= visual_lines {
+                    break;
+                }
+            }
+
+            source_count.max(1)
+        } else {
+            visual_lines
+        }
     }
 
-    /// Scroll up by half viewport height
-    pub fn scroll_half_page_up(&mut self, viewport_height: usize) {
+    /// Scroll down by half viewport height (accounting for wrapping)
+    pub fn scroll_half_page_down(&mut self, viewport_height: usize, viewport_width: usize) {
         let half_page = viewport_height / 2;
-        self.move_cursor_up(half_page);
+        let source_lines = self.calculate_source_lines_for_visual_lines(half_page, viewport_width, true);
+        self.move_cursor_down(source_lines);
+    }
+
+    /// Scroll up by half viewport height (accounting for wrapping)
+    pub fn scroll_half_page_up(&mut self, viewport_height: usize, viewport_width: usize) {
+        let half_page = viewport_height / 2;
+        let source_lines = self.calculate_source_lines_for_visual_lines(half_page, viewport_width, false);
+        self.move_cursor_up(source_lines);
     }
 
     /// Auto-scroll viewport to keep cursor visible
@@ -710,13 +770,14 @@ mod tests {
         let mut app = App::new(config, doc);
 
         let viewport_height = 20;
+        let viewport_width = 80;
 
-        // Half page down (10 lines)
-        app.scroll_half_page_down(viewport_height);
+        // Half page down (10 lines, no wrapping with short lines)
+        app.scroll_half_page_down(viewport_height, viewport_width);
         assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 10);
 
         // Half page up
-        app.scroll_half_page_up(viewport_height);
+        app.scroll_half_page_up(viewport_height, viewport_width);
         assert_eq!(app.panes.focused_pane().unwrap().view.cursor_line, 0);
     }
 
