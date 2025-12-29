@@ -85,7 +85,13 @@ fn worker_loop(request_rx: Receiver<DiffRequest>, result_tx: Sender<DiffResult>)
                 }
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                // Channel closed, exit
+                // Channel closed, process any pending requests before exiting
+                for (_doc_id, req) in pending.drain() {
+                    if let Some(result) = compute_diff(req) {
+                        // Try to send result (may fail if receiver is already dropped)
+                        let _ = result_tx.send(result);
+                    }
+                }
                 break;
             }
         }

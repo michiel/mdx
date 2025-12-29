@@ -74,6 +74,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
     use ratatui::text::Span;
 
+    // Split area for breadcrumb and content
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Breadcrumb
+            Constraint::Min(1),    // Content
+        ])
+        .split(area);
+
+    let breadcrumb_area = chunks[0];
+    let content_area = chunks[1];
+
+    // Render breadcrumb
+    render_breadcrumb(frame, app, breadcrumb_area, pane_id);
+
     // Get the pane's view state
     let pane = match app.panes.panes.get(&pane_id) {
         Some(p) => p,
@@ -95,7 +110,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
 
     // If in raw mode, render plain text without markdown processing
     if pane.view.show_raw {
-        render_raw_text(frame, app, area, pane_id, scroll, cursor, is_focused, selection_range, line_count);
+        render_raw_text(frame, app, content_area, pane_id, scroll, cursor, is_focused, selection_range, line_count);
         return;
     }
 
@@ -141,7 +156,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     let mut styled_lines: Vec<Line> = Vec::new();
     let mut is_table_row_flags: Vec<bool> = Vec::new();
     // Account for borders (top and bottom borders take 2 lines)
-    let content_height = area.height.saturating_sub(2) as usize;
+    let content_height = content_area.height.saturating_sub(2) as usize;
     let visible_end = (scroll + content_height).min(line_count);
     let mut is_first_code_line = false;
 
@@ -166,7 +181,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             if is_table_row(line_text) && is_table_separator_row(next_line) {
                 let (table_lines, consumed) = render_table_block(
                     app,
-                    area,
+                    content_area,
                     line_idx,
                     visible_end,
                     line_count,
@@ -221,17 +236,18 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         };
         line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
 
-        // Add diff gutter
+        // Add diff gutter with vertical bars
         #[cfg(feature = "git")]
         if app.config.git.diff {
             use mdx_core::diff::DiffMark;
-            let gutter = match app.doc.diff_gutter.get(line_idx) {
+            let mark = app.doc.diff_gutter.get(line_idx);
+            let gutter = match mark {
                 DiffMark::None => "  ",
-                DiffMark::Added => "+ ",
-                DiffMark::Modified => "~ ",
-                DiffMark::DeletedAfter(_) => "▾ ",
+                DiffMark::Added => "│ ",
+                DiffMark::Modified => "│ ",
+                DiffMark::DeletedAfter(_) => "│ ",
             };
-            let gutter_color = match app.doc.diff_gutter.get(line_idx) {
+            let gutter_color = match mark {
                 DiffMark::None => Color::DarkGray,
                 DiffMark::Added => Color::Green,
                 DiffMark::Modified => Color::Yellow,
@@ -262,8 +278,8 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
             let line_visual_width: usize = line_spans.iter()
                 .map(|span| span.content.chars().count())
                 .sum();
-            // Calculate available width (area width - borders)
-            let available_width = area.width.saturating_sub(2) as usize;
+            // Calculate available width (content_area width - borders)
+            let available_width = content_area.width.saturating_sub(2) as usize;
 
             if is_first_code_line && !code_block_lang.is_empty() {
                 // Add language label on the right side of the first line
@@ -336,7 +352,7 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
     };
 
     // Manual wrapping to indent continuation lines
-    let available_width = area.width.saturating_sub(2) as usize; // -2 for borders
+    let available_width = content_area.width.saturating_sub(2) as usize; // -2 for borders
     let content_start = left_margin_width as usize;
     let content_width = available_width.saturating_sub(content_start);
 
@@ -469,7 +485,91 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         .block(Block::default().borders(Borders::ALL).border_style(border_style))
         .style(app.theme.base);
 
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, content_area);
+}
+
+/// Render breadcrumb bar with heading hierarchy and git status
+fn render_breadcrumb(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pane_id: usize) {
+    use ratatui::text::Span;
+
+    let is_focused = app.panes.focused == pane_id;
+    let breadcrumbs = app.get_breadcrumb_path(pane_id);
+
+    if breadcrumbs.is_empty() {
+        // No breadcrumb - just render empty line
+        let empty_line = Line::from(vec![]);
+        frame.render_widget(Paragraph::new(vec![empty_line]), area);
+        return;
+    }
+
+    // Build breadcrumb spans
+    let mut spans = Vec::new();
+
+    // Limit breadcrumb to 50% of viewport width
+    let max_breadcrumb_width = (area.width / 2) as usize;
+    let mut current_width = 0;
+
+    // Add breadcrumb items with separators
+    for (idx, crumb) in breadcrumbs.iter().enumerate() {
+        if idx > 0 {
+            // Add separator
+            let sep = " › ";
+            if current_width + sep.len() >= max_breadcrumb_width {
+                spans.push(Span::styled("…", Style::default().fg(Color::DarkGray)));
+                break;
+            }
+            spans.push(Span::styled(sep, Style::default().fg(Color::DarkGray)));
+            current_width += sep.len();
+        }
+
+        // Truncate crumb if needed
+        let crumb_text = if current_width + crumb.len() > max_breadcrumb_width {
+            let available = max_breadcrumb_width.saturating_sub(current_width).saturating_sub(1);
+            if available > 3 {
+                format!("{}…", &crumb.chars().take(available - 1).collect::<String>())
+            } else {
+                "…".to_string()
+            }
+        } else {
+            crumb.clone()
+        };
+
+        current_width += crumb_text.len();
+
+        // Style the breadcrumb
+        let crumb_style = if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(crumb_text.clone(), crumb_style));
+
+        if current_width >= max_breadcrumb_width {
+            break;
+        }
+    }
+
+    // Add git status indicator if available
+    #[cfg(feature = "git")]
+    if let Some(status) = app.get_git_status() {
+        let (status_text, status_color) = match status {
+            "new" => ("│ new", Color::Green),
+            "modified" => ("│ modified", Color::Yellow),
+            "deleted" => ("│ deleted", Color::Red),
+            _ => ("│", Color::DarkGray),
+        };
+
+        // Add spacing before status
+        let padding_width = area.width.saturating_sub(current_width as u16 + status_text.len() as u16 + 2);
+        if padding_width > 0 {
+            spans.push(Span::raw(" ".repeat(padding_width as usize)));
+        }
+
+        spans.push(Span::styled(status_text, Style::default().fg(status_color)));
+    }
+
+    let breadcrumb_line = Line::from(spans);
+    frame.render_widget(Paragraph::new(vec![breadcrumb_line]), area);
 }
 
 /// Render raw text without markdown processing
@@ -517,15 +617,15 @@ fn render_raw_text(
         };
         line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
 
-        // Add diff gutter
+        // Add diff gutter with vertical bars
         #[cfg(feature = "git")]
         if app.config.git.diff {
             use mdx_core::diff::DiffMark;
             let gutter = match app.doc.diff_gutter.get(line_idx) {
                 DiffMark::None => "  ",
-                DiffMark::Added => "+ ",
-                DiffMark::Modified => "~ ",
-                DiffMark::DeletedAfter(_) => "▾ ",
+                DiffMark::Added => "│ ",
+                DiffMark::Modified => "│ ",
+                DiffMark::DeletedAfter(_) => "│ ",
             };
             let gutter_color = match app.doc.diff_gutter.get(line_idx) {
                 DiffMark::None => Color::DarkGray,
@@ -980,9 +1080,9 @@ fn render_table_block(
                     use mdx_core::diff::DiffMark;
                     let gutter = match app.doc.diff_gutter.get(*source_idx) {
                         DiffMark::None => "  ",
-                        DiffMark::Added => "+ ",
-                        DiffMark::Modified => "~ ",
-                        DiffMark::DeletedAfter(_) => "▾ ",
+                        DiffMark::Added => "│ ",
+                        DiffMark::Modified => "│ ",
+                        DiffMark::DeletedAfter(_) => "│ ",
                     };
                     let gutter_color = match app.doc.diff_gutter.get(*source_idx) {
                         DiffMark::None => Color::DarkGray,

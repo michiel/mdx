@@ -126,7 +126,6 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                     // Apply the diff gutter
                     app.doc.diff_gutter = result.gutter;
                 }
-                // Otherwise discard stale result
             }
         }
     }

@@ -37,13 +37,17 @@ pub struct Document {
 impl Document {
     /// Load a document from a file path
     pub fn load(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+        // Canonicalize the path to get absolute path (needed for git integration)
+        let abs_path = path.canonicalize()
+            .with_context(|| format!("Failed to canonicalize path: {}", path.display()))?;
+
+        let content = fs::read_to_string(&abs_path)
+            .with_context(|| format!("Failed to read file: {}", abs_path.display()))?;
 
         let rope = Rope::from_str(&content);
         let headings = toc::extract_headings(&rope);
 
-        let metadata = fs::metadata(path).ok();
+        let metadata = fs::metadata(&abs_path).ok();
         let mtime = metadata.and_then(|m| m.modified().ok());
 
         // Initialize with empty diff gutter - will be computed asynchronously by worker thread
@@ -54,7 +58,7 @@ impl Document {
         };
 
         Ok(Self {
-            path: path.to_path_buf(),
+            path: abs_path,
             rope,
             headings,
             loaded_mtime: mtime,

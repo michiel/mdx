@@ -24,8 +24,9 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     }
     let abs_path = abs_path.unwrap();
 
-    // Try to discover and open repository
-    let repo = discover(&abs_path);
+    // Try to discover and open repository (use parent directory for discovery)
+    let discover_path = abs_path.parent().unwrap_or(&abs_path);
+    let repo = discover(discover_path);
     if repo.is_err() {
         return Ok(None);
     }

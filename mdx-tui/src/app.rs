@@ -348,6 +348,84 @@ impl App {
         None
     }
 
+    /// Get breadcrumb path for a specific pane based on its cursor position
+    pub fn get_breadcrumb_path(&self, pane_id: usize) -> Vec<String> {
+        let mut breadcrumbs = Vec::new();
+
+        if self.doc.headings.is_empty() {
+            return breadcrumbs;
+        }
+
+        let pane = match self.panes.panes.get(&pane_id) {
+            Some(p) => p,
+            None => return breadcrumbs,
+        };
+
+        let cursor_line = pane.view.cursor_line;
+
+        // Find the current heading
+        let current_idx = self.doc.headings.iter()
+            .enumerate()
+            .rev()
+            .find(|(_, h)| h.line <= cursor_line)
+            .map(|(i, _)| i);
+
+        let current_idx = match current_idx {
+            Some(idx) => idx,
+            None => return breadcrumbs,
+        };
+
+        // Build breadcrumb path by walking back through headings
+        let current_heading = &self.doc.headings[current_idx];
+        let mut path_headings = vec![current_heading];
+
+        // Walk backwards to find parent headings
+        let mut current_level = current_heading.level;
+        for heading in self.doc.headings[..current_idx].iter().rev() {
+            if heading.level < current_level {
+                path_headings.push(heading);
+                current_level = heading.level;
+                if current_level == 1 {
+                    break; // Stop at top-level heading
+                }
+            }
+        }
+
+        // Reverse to get top-down order
+        path_headings.reverse();
+
+        // Extract text
+        for heading in path_headings {
+            breadcrumbs.push(heading.text.clone());
+        }
+
+        breadcrumbs
+    }
+
+    /// Get git status for the document (overall file status)
+    #[cfg(feature = "git")]
+    pub fn get_git_status(&self) -> Option<&'static str> {
+        if !self.config.git.diff {
+            return None;
+        }
+
+        // Check if there are any changes in the diff gutter
+        let has_added = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::Added));
+        let has_modified = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::Modified));
+        let has_deleted = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::DeletedAfter(_)));
+
+        // Priority: new > modified > deleted
+        if has_added && !has_modified && !has_deleted {
+            Some("new")
+        } else if has_modified || (has_added && has_modified) {
+            Some("modified")
+        } else if has_deleted {
+            Some("deleted")
+        } else {
+            None
+        }
+    }
+
     /// Split the focused pane
     pub fn split_focused(&mut self, dir: crate::panes::SplitDir) {
         self.panes.split_focused(dir, 0); // doc_id is 0 for single document
