@@ -2023,86 +2023,60 @@ fn render_image_info_placeholder(
         false
     };
 
-    // Show informative placeholder for calculated height
-    let display_height = height.max(3);
-    for i in 0..display_height {
-        let mut line_spans: Vec<Span> = Vec::new();
+    // Show informative placeholder - just show single line with info
+    let mut line_spans: Vec<Span> = Vec::new();
 
-        // Only show line number and gutter on first line
-        if i == 0 {
-            // Line number
-            let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
-            let line_num_color = if is_focused && source_line == cursor {
-                Color::White
-            } else {
-                Color::DarkGray
-            };
-            line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+    // Line number
+    let line_num = format!("{:>width$} ", source_line + 1, width = line_num_width);
+    let line_num_color = if is_focused && source_line == cursor {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
+    line_spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
 
-            // Git diff gutter
-            #[cfg(feature = "git")]
-            if app.config.git.diff {
-                use mdx_core::diff::DiffMark;
-                let gutter = match app.doc.diff_gutter.get(source_line) {
-                    DiffMark::None => "  ",
-                    DiffMark::Added => "│ ",
-                    DiffMark::Modified => "│ ",
-                    DiffMark::DeletedAfter(_) => "│ ",
-                };
-                let gutter_color = match app.doc.diff_gutter.get(source_line) {
-                    DiffMark::None => Color::DarkGray,
-                    DiffMark::Added => Color::Green,
-                    DiffMark::Modified => Color::Yellow,
-                    DiffMark::DeletedAfter(_) => Color::Red,
-                };
-                line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
-            } else {
-                line_spans.push(Span::raw("  "));
-            }
-            #[cfg(not(feature = "git"))]
-            line_spans.push(Span::raw("  "));
-        } else {
-            // Continuation lines - just indent
-            let indent_width = line_num_width + 2; // line number + gutter
-            line_spans.push(Span::raw(" ".repeat(indent_width + 1)));
-        }
-
-        // Add placeholder content
-        if i == display_height / 2 {
-            // Center line with info
-            line_spans.push(Span::styled(
-                info_text.clone(),
-                Style::default()
-                    .fg(Color::Rgb(100, 200, 255))
-                    .bg(Color::Rgb(30, 40, 50))
-                    .add_modifier(Modifier::BOLD)
-            ));
-        } else if i == 0 || i == display_height - 1 {
-            // Border lines
-            let border = "─".repeat(info_text.len().min(60));
-            line_spans.push(Span::styled(
-                border,
-                Style::default().fg(Color::Rgb(60, 80, 100)).bg(Color::Rgb(20, 25, 30))
-            ));
-        } else {
-            // Empty placeholder line
-            line_spans.push(Span::styled(
-                " ".repeat(info_text.len().min(60)),
-                Style::default().bg(Color::Rgb(20, 25, 30))
-            ));
-        }
-
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting if this is the cursor or selected line
-        if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
-        } else if is_focused && source_line == cursor {
-            line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
-        }
-
-        lines.push(line);
+    // Git diff gutter
+    #[cfg(feature = "git")]
+    if app.config.git.diff {
+        use mdx_core::diff::DiffMark;
+        let gutter = match app.doc.diff_gutter.get(source_line) {
+            DiffMark::None => "  ",
+            DiffMark::Added => "│ ",
+            DiffMark::Modified => "│ ",
+            DiffMark::DeletedAfter(_) => "│ ",
+        };
+        let gutter_color = match app.doc.diff_gutter.get(source_line) {
+            DiffMark::None => Color::DarkGray,
+            DiffMark::Added => Color::Green,
+            DiffMark::Modified => Color::Yellow,
+            DiffMark::DeletedAfter(_) => Color::Red,
+        };
+        line_spans.push(Span::styled(gutter, Style::default().fg(gutter_color)));
+    } else {
+        line_spans.push(Span::raw("  "));
     }
+    #[cfg(not(feature = "git"))]
+    line_spans.push(Span::raw("  "));
+
+    // Add placeholder content - just the info text without borders
+    line_spans.push(Span::styled(
+        info_text.clone(),
+        Style::default()
+            .fg(Color::Rgb(100, 200, 255))
+            .bg(Color::Rgb(30, 40, 50))
+            .add_modifier(Modifier::BOLD)
+    ));
+
+    let mut line = Line::from(line_spans);
+
+    // Apply highlighting if this is the cursor or selected line
+    if is_focused && is_selected {
+        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+    } else if is_focused && source_line == cursor {
+        line = line.style(Style::default().bg(Color::Rgb(40, 44, 52)));
+    }
+
+    lines.push(line);
 
     (lines, 1)
 }
