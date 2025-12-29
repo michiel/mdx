@@ -1,129 +1,252 @@
 # mdx
 
-`mdx` is a fast TUI Markdown viewer and editor launcher built in Rust. It aims
-for md-tui level rendering polish with Vim-style navigation, a TOC sidebar,
-split panes, linewise selection and yank, file watching, and an inline git diff
-gutter.
+A fast, terminal-based Markdown viewer and editor launcher built in Rust. Designed for developers who want to quickly browse Markdown documentation with Vim-style navigation, table of contents, split panes, and git diff integration.
 
 ## Features
 
-- Fast, low-latency rendering for large Markdown files
-- High-quality Markdown rendering (headings, lists, tables, code fences, links)
-- Vim-style navigation in normal mode (`hjkl`, `gg`, `G`, `^u`, `^d`, `/`, `n/N`)
-- TOC sidebar toggle and jump-to-heading
-- Split panes (horizontal and vertical) with focus movement
-- Visual line selection and yank to clipboard
-- Open current file in an external editor (`$EDITOR`)
-- File watching with on-disk change indicator and optional auto-reload
-- Inline git diff gutter against `HEAD` or index
-- Dark and light theme toggle
+### Rendering and Display
+
+- **Fast rendering** - Low-latency display optimised for large Markdown files
+- **High-quality Markdown** - Supports headings, lists, tables, code blocks with syntax highlighting, and inline formatting
+- **Git diff gutter** - Visual indicators showing added, modified, and deleted lines compared to git HEAD or index
+- **Dual themes** - Toggle between dark and light colour schemes
+- **Split panes** - View multiple sections simultaneously with horizontal and vertical splits
+
+### Navigation and Editing
+
+- **Vim-style navigation** - Familiar keybindings (`hjkl`, `gg`, `G`, `Ctrl-u`, `Ctrl-d`, `/`, `n`, `N`)
+- **Table of contents** - Sidebar with document outline and quick heading navigation
+- **Visual line mode** - Select and yank multiple lines to clipboard
+- **Search** - Forward search with next/previous match navigation
+- **External editor** - Launch your preferred editor at the current line
+
+### File Management
+
+- **File watching** - Automatic detection of on-disk changes with optional auto-reload
+- **Multi-document** - Open multiple files in split panes
+- **Cross-platform** - Works on Linux, macOS, and Windows
 
 ## Installation
 
-This repository is a Cargo workspace, so `cargo install --path .` fails with a
-virtual manifest error. Install the `mdx` package from its crate directory:
+### Pre-built Binaries
+
+Download pre-built binaries from the [releases page](https://github.com/soof-golan/mdx/releases):
+
+- **Linux x86_64**: `mdx-linux-x86_64`
+- **Linux ARM64**: `mdx-linux-aarch64`
+- **macOS Intel**: `mdx-macos-x86_64`
+- **macOS Apple Silicon**: `mdx-macos-aarch64`
+- **Windows**: `mdx-windows-x86_64.exe`
+
+After downloading, make the binary executable and move it to your PATH:
 
 ```bash
-cargo install --path mdx
+# Linux/macOS
+chmod +x mdx-linux-x86_64
+sudo mv mdx-linux-x86_64 /usr/local/bin/mdx
+
+# Or install to user directory
+mkdir -p ~/.local/bin
+mv mdx-linux-x86_64 ~/.local/bin/mdx
 ```
 
-For a debug build without installing:
+### From Source
+
+This repository is a Cargo workspace. To install from source:
 
 ```bash
-cargo run -p mdx -- --help
+# Install from the mdx crate directory
+cargo install --path mdx
+
+# Or install with all features
+cargo install --path mdx --features git,watch
+```
+
+For development:
+
+```bash
+# Run without installing
+cargo run -p mdx -- README.md
+
+# Run tests
+cargo test
+
+# Build optimised binary
+cargo build --release -p mdx
 ```
 
 ## Usage
 
+Open any Markdown file:
+
 ```bash
-mdx <path>
+mdx README.md
+mdx docs/guide.md
 ```
 
-To open the current file in your editor, `mdx` uses `$EDITOR` by default. You
-can configure a custom command template in `mdx.yaml`.
+### Quick Start
 
-## Keybindings (default)
+- Press `j`/`k` to scroll line by line
+- Press `Ctrl-d`/`Ctrl-u` for half-page scrolling
+- Press `T` to toggle the table of contents sidebar
+- Press `/` to search, then `n`/`N` to navigate matches
+- Press `e` to open the file in your external editor
+- Press `M` to toggle between dark and light themes
+- Press `q` to quit
 
-Navigation:
+The application uses `$EDITOR` by default for external editing. Configure a custom editor in `mdx.yaml`.
 
-- `j/k`: move cursor line
-- `^d` / `^u`: half-page down/up
-- `gg` / `G`: top / bottom
-- `/` then `Enter`: search forward
-- `n` / `N`: next / previous match
+## Keybindings
 
-TOC:
+### Navigation
 
-- `T`: toggle TOC
-- `j/k`: move within TOC
-- `Enter`: jump to heading
-- `q`: close TOC
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move cursor down/up one line |
+| `Ctrl-d` / `Ctrl-u` | Scroll half-page down/up |
+| `gg` / `G` | Jump to top/bottom of document |
+| `/` | Start search (press Enter to confirm) |
+| `n` / `N` | Jump to next/previous search match |
 
-Splits:
+### Table of Contents
 
-- `^w s`: horizontal split
-- `^w v`: vertical split
-- `^↑ ^↓ ^← ^→`: move focus across panes
+| Key | Action |
+|-----|--------|
+| `T` | Toggle TOC sidebar |
+| `j` / `k` | Navigate within TOC |
+| `Enter` | Jump to selected heading |
+| `q` | Close TOC sidebar |
 
-Selection and yank:
+### Split Panes
 
-- `Shift+V`: enter visual line mode
-- `j/k/^u/^d/gg/G`: expand selection
-- `Y`: yank selection to clipboard
-- `Esc`: exit visual line mode
+| Key | Action |
+|-----|--------|
+| `Ctrl-w s` | Create horizontal split |
+| `Ctrl-w v` | Create vertical split |
+| `Ctrl-↑` / `Ctrl-↓` / `Ctrl-←` / `Ctrl-→` | Move focus between panes |
 
-Other:
+### Selection and Clipboard
 
-- `M`: toggle theme
-- `e`: open in external editor
-- `r`: reload file (when auto-reload is off)
-- `q`: quit
+| Key | Action |
+|-----|--------|
+| `Shift-V` | Enter visual line mode |
+| `j` / `k` / `Ctrl-u` / `Ctrl-d` / `gg` / `G` | Expand selection |
+| `Y` | Yank (copy) selection to clipboard |
+| `Esc` | Exit visual line mode |
+
+### Other Commands
+
+| Key | Action |
+|-----|--------|
+| `M` | Toggle between dark and light themes |
+| `e` | Open file in external editor |
+| `r` | Reload file from disk (when auto-reload is disabled) |
+| `q` | Quit application |
 
 ## Configuration
 
-`mdx` reads a YAML config file from the platform config directory:
+Configuration is read from a YAML file in the platform-specific config directory:
 
-- Linux: `~/.config/mdx/mdx.yaml` (or `$XDG_CONFIG_HOME/mdx/mdx.yaml`)
-- macOS: `~/Library/Application Support/mdx/mdx.yaml`
-- Windows: `%APPDATA%\\mdx\\mdx.yaml`
+- **Linux**: `~/.config/mdx/mdx.yaml` (or `$XDG_CONFIG_HOME/mdx/mdx.yaml`)
+- **macOS**: `~/Library/Application Support/mdx/mdx.yaml`
+- **Windows**: `%APPDATA%\mdx\mdx.yaml`
 
-Example:
+### Example Configuration
 
 ```yaml
-theme: dark            # dark|light
+# Theme selection
+theme: dark            # Options: dark, light
+
+# Table of contents settings
 toc:
-  enabled: true
-  side: left           # left|right
-  width: 32            # columns
+  enabled: true        # Show TOC on startup
+  side: left           # Options: left, right
+  width: 32            # Width in columns
+
+# External editor configuration
 editor:
-  command: "$EDITOR"
-  args: ["+{line}", "{file}"]
+  command: "$EDITOR"   # Use $EDITOR environment variable
+  args: ["+{line}", "{file}"]  # {line} and {file} are replaced at runtime
+
+# File watching settings
 watch:
-  enabled: true
-  auto_reload: false
+  enabled: true        # Watch files for changes
+  auto_reload: false   # Automatically reload on change (false = show indicator only)
+
+# Git integration settings
 git:
-  diff: true
-  base: head           # head|index
+  diff: true           # Show git diff gutter
+  base: head           # Options: head, index (compare against HEAD or staging area)
 ```
 
-## Workspace layout
+### Editor Configuration Examples
 
-- `mdx-core`: parsing, document model, TOC, selection, git diff, config
-- `mdx-tui`: TUI app, panes, input handling, rendering
-- `mdx`: CLI and runtime wiring
+**Neovim/Vim**:
+```yaml
+editor:
+  command: "nvim"
+  args: ["+{line}", "{file}"]
+```
 
-## Build and test
+**VSCode**:
+```yaml
+editor:
+  command: "code"
+  args: ["--goto", "{file}:{line}"]
+```
+
+**Emacs**:
+```yaml
+editor:
+  command: "emacs"
+  args: ["+{line}", "{file}"]
+```
+
+## Development
+
+### Repository Structure
+
+This is a Cargo workspace containing three crates:
+
+- **mdx-core** - Core library with document parsing, TOC extraction, git diff, and configuration
+- **mdx-tui** - Terminal UI implementation with ratatui, pane management, and input handling
+- **mdx** - Binary crate that wires everything together
+
+### Building and Testing
 
 ```bash
+# Build all crates
 cargo build
+
+# Build with all features
+cargo build --features git,watch
+
+# Run tests
 cargo test
+
+# Run clippy
+cargo clippy --all-targets --all-features
+
+# Format code
+cargo fmt
 ```
 
-## Roadmap highlights
+## Contributing
 
-- Improved source-to-render mapping for selection and diff gutters
-- Enhanced markdown rendering controls and theming
-- Additional keybinding customisation
+Contributions are welcome. Please ensure:
+
+- All tests pass (`cargo test`)
+- Code is formatted (`cargo fmt`)
+- Clippy is happy (`cargo clippy`)
+- Commit messages are clear and descriptive
+
+## Roadmap
+
+- Improved source-to-render line mapping for more accurate selection and diff gutters
+- Enhanced Markdown rendering with additional CommonMark features
+- Customisable keybindings via configuration file
+- Support for following Markdown links
+- Document bookmarks and history
 
 ## Licence
 
