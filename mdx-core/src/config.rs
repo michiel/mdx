@@ -200,17 +200,6 @@ impl Config {
                     config.images.enabled = false;
                 }
 
-                // Generate informational warnings for security settings
-                if config.security.safe_mode {
-                    warnings.push(SecurityEvent::info("Safe mode enabled", "config"));
-                }
-                if config.security.no_exec {
-                    warnings.push(SecurityEvent::info(
-                        "External editor execution disabled",
-                        "config"
-                    ));
-                }
-
                 return Ok((config, warnings));
             }
         }
@@ -219,17 +208,6 @@ impl Config {
         let mut config = Self::default();
         if config.security.safe_mode {
             config.images.enabled = false;
-        }
-
-        // Generate warnings for default security settings
-        if config.security.safe_mode {
-            warnings.push(SecurityEvent::info("Safe mode enabled (default)", "config"));
-        }
-        if config.security.no_exec {
-            warnings.push(SecurityEvent::info(
-                "External editor execution disabled (default)",
-                "config"
-            ));
         }
 
         Ok((config, warnings))
@@ -298,10 +276,8 @@ mod tests {
     #[test]
     fn test_load_missing_config() -> Result<()> {
         // Loading should return defaults when file doesn't exist
-        let (config, warnings) = Config::load()?;
+        let (config, _warnings) = Config::load()?;
         assert_eq!(config.theme, ThemeVariant::Dark);
-        // Should have warnings for default security settings
-        assert!(!warnings.is_empty());
         Ok(())
     }
 
