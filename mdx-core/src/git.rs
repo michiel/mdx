@@ -33,7 +33,7 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     let repo = repo.unwrap();
 
     // Get working directory
-    let workdir = match repo.work_dir() {
+    let workdir = match repo.workdir() {
         Some(wd) => wd.to_path_buf(),
         None => return Ok(None), // Bare repo
     };
@@ -74,7 +74,7 @@ fn is_path_ignored(repo: &gix::Repository, rel_path: &Path) -> bool {
     }
 
     // For untracked files, use git check-ignore command as reliable method
-    if let Some(workdir) = repo.work_dir() {
+    if let Some(workdir) = repo.workdir() {
         let full_path = workdir.join(rel_path);
 
         // Run git check-ignore on the file
@@ -113,7 +113,7 @@ pub fn read_head_file_text(repo: &gix::Repository, rel_path: &Path) -> Result<Op
     let mut head = head.unwrap();
 
     // Try to peel to commit
-    let commit = head.peel_to_commit_in_place();
+    let commit = head.peel_to_commit();
     if commit.is_err() {
         // Unborn HEAD or invalid
         return Ok(None);
@@ -128,8 +128,7 @@ pub fn read_head_file_text(repo: &gix::Repository, rel_path: &Path) -> Result<Op
     let tree = tree.unwrap();
 
     // Lookup entry by path (use Path directly, not BString)
-    let mut buf = Vec::new();
-    let entry = tree.lookup_entry_by_path(rel_path, &mut buf);
+    let entry = tree.lookup_entry_by_path(rel_path);
     if entry.is_err() {
         // File not in tree (new file)
         return Ok(Some(String::new()));

@@ -16,7 +16,7 @@ repository = "https://github.com/your-repo/mdx"
 [workspace.dependencies]
 # Core text handling
 ropey = "1.6"
-pulldown-cmark = "0.11"
+pulldown-cmark = "0.13"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -26,9 +26,9 @@ serde_yaml = "0.9"
 anyhow = "1.0"
 
 # Terminal UI
-ratatui = "0.28"
+ratatui = "0.30"
 crossterm = "0.28"
-unicode-width = "0.1"
+unicode-width = "0.2"
 
 # Markdown rendering for TUI
 tui-markdown = "0.3"
@@ -47,7 +47,7 @@ notify = "6.1"
 
 # Git diff
 similar = "2.6"
-gix = "0.66"
+gix = "0.76"
 bstr = "1.10"
 
 # Event bus
