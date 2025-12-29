@@ -515,7 +515,31 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 current_width += span_width;
             } else {
                 // Need to wrap
-                if !current_line_spans.is_empty() {
+                // Determine if we should wrap now or try to keep content together
+                // Don't wrap if the span that doesn't fit is very short (< 15 chars)
+                // and we have minimal content - this prevents orphaning styled text
+                let span_is_short = span_width < 15;
+                let current_content_width = if first_segment {
+                    current_width.saturating_sub(content_start)
+                } else {
+                    let extra_indent = list_continuation_indent.unwrap_or(0);
+                    let indent_width = content_start + extra_indent;
+                    current_width.saturating_sub(indent_width)
+                };
+
+                let should_wrap = if !current_line_spans.is_empty() {
+                    // If the span is short and we have little content, try to keep them together
+                    // by not wrapping yet (let the span overflow and wrap within itself)
+                    if span_is_short && current_content_width < 20 {
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                };
+
+                if should_wrap {
                     wrapped_lines.push(Line::from(current_line_spans.clone()));
                     current_line_spans.clear();
                     current_width = 0;
