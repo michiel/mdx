@@ -207,9 +207,12 @@ fn render_markdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, pa
         #[cfg(feature = "images")]
         if !in_code_block {
             use mdx_core::config::ImageEnabled;
+            let backend = crate::image_backend::select_backend(app.config.images.backend);
+            let has_backend = !matches!(backend, mdx_core::config::ImageBackend::None);
+
             let should_render_images = match app.config.images.enabled {
                 ImageEnabled::Always => true,
-                ImageEnabled::Auto => true, // TODO: Check terminal capabilities
+                ImageEnabled::Auto => has_backend,
                 ImageEnabled::Never => false,
             };
 
