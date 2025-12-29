@@ -6,11 +6,12 @@ This plan implements optional inline image rendering for Markdown images (`![alt
 
 ## Design Principles
 
-1. **Feature flag controlled** - Images disabled by default, opt-in via configuration
+1. **Enabled by default** - Images render automatically when terminal supports them
 2. **Graceful degradation** - Falls back to text placeholders on unsupported terminals
-3. **No breaking changes** - Existing functionality remains unchanged when disabled
+3. **No breaking changes** - Existing functionality remains unchanged
 4. **Performance first** - Caching and lazy loading to maintain fast scrolling
 5. **Offline by default** - Remote URLs disabled unless explicitly enabled
+6. **Responsive sizing** - Image dimensions adapt to pane size (50% height, 90% width max)
 
 ## Architecture Summary
 
@@ -38,12 +39,19 @@ Add new configuration struct:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageConfig {
-    pub enabled: bool,
+    pub enabled: ImageEnabled,
     pub backend: ImageBackend,
-    pub max_width: u16,
-    pub max_height: u16,
+    pub max_width_percent: u8,   // Percentage of pane width (1-100)
+    pub max_height_percent: u8,  // Percentage of pane height (1-100)
     pub allow_remote: bool,
     pub cache_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageEnabled {
+    Auto,  // Enable if terminal supports it
+    Always,
+    Never,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,10 +66,10 @@ pub enum ImageBackend {
 impl Default for ImageConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: ImageEnabled::Auto,
             backend: ImageBackend::Auto,
-            max_width: 60,
-            max_height: 20,
+            max_width_percent: 90,   // 90% of pane width
+            max_height_percent: 50,  // 50% of pane height
             allow_remote: false,
             cache_dir: None,
         }
@@ -80,9 +88,10 @@ pub struct Config {
 ```
 
 **Tests**:
-- Verify default configuration values
-- Test YAML serialisation/deserialisation
+- Verify default configuration values (enabled: Auto, max_width: 90%, max_height: 50%)
+- Test YAML serialisation/deserialisation for ImageEnabled enum
 - Test configuration loading with and without images section
+- Verify percentage values are clamped to 1-100 range
 
 #### 1.2: Add image feature flag
 
@@ -314,7 +323,7 @@ When rendering document lines, detect image nodes and render placeholder:
 ```rust
 // In render_document_content or similar function
 #[cfg(feature = "images")]
-if app.config.images.enabled {
+if app.images_active {
     // Check if current line contains an image
     if let Some(image) = find_image_at_line(&app.doc.images, line_idx) {
         // Render placeholder
@@ -326,8 +335,12 @@ if app.config.images.enabled {
             Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)
         ));
 
-        // Reserve vertical space (multiple lines if needed)
-        let image_height = calculate_image_height(&image, &app.config.images);
+        // Reserve vertical space (percentage of pane height)
+        let pane_height = content_area.height;
+        let image_height = calculate_placeholder_height(
+            pane_height,
+            app.config.images.max_height_percent,
+        );
         for _ in 1..image_height {
             styled_lines.push(Line::from(""));
             line_idx += 1;
@@ -346,9 +359,10 @@ fn find_image_at_line(images: &[ImageNode], line: usize) -> Option<&ImageNode> {
 }
 
 #[cfg(feature = "images")]
-fn calculate_image_height(image: &ImageNode, config: &ImageConfig) -> usize {
-    // Initially just return a fixed height
-    3  // Reserve 3 lines for placeholder
+fn calculate_placeholder_height(pane_height: u16, max_percent: u8) -> usize {
+    // Reserve space based on percentage of pane height (minimum 3 lines)
+    let height = (pane_height as f32 * (max_percent as f32 / 100.0)) as usize;
+    height.max(3)
 }
 ```
 
@@ -368,7 +382,16 @@ Add keybinding to toggle images:
 // In handle_input or normal mode handling
 #[cfg(feature = "images")]
 KeyCode::Char('I') => {
-    app.config.images.enabled = !app.config.images.enabled;
+    // Toggle runtime images flag
+    app.images_active = !app.images_active;
+
+    // Re-initialise or clear cache based on new state
+    if app.images_active {
+        app.image_cache = Some(ImageCache::new(&app.config.images));
+    } else {
+        app.image_cache = None;
+    }
+
     Action::Continue
 }
 ```
@@ -380,7 +403,7 @@ Add status indicator when images are enabled:
 ```rust
 // In status bar rendering
 #[cfg(feature = "images")]
-if app.config.images.enabled {
+if app.images_active {
     status_parts.push(Span::styled(
         "[IMG]",
         Style::default().fg(Color::Green)
@@ -562,16 +585,45 @@ Initialise in `App::new()`:
 
 ```rust
 #[cfg(feature = "images")]
-let image_cache = if config.images.enabled {
-    Some(ImageCache::new(&config.images))
-} else {
-    None
+let (image_cache, images_active) = {
+    // Detect terminal support
+    let backend = detect_backend(config.images.backend);
+    let has_support = backend != DetectedBackend::None;
+
+    // Determine if images should be active
+    let active = match config.images.enabled {
+        ImageEnabled::Auto => has_support,
+        ImageEnabled::Always => true,
+        ImageEnabled::Never => false,
+    };
+
+    let cache = if active {
+        Some(ImageCache::new(&config.images))
+    } else {
+        None
+    };
+
+    (cache, active)
 };
 ```
 
+Store in App struct:
+
+```rust
+pub struct App {
+    // ... existing fields
+    #[cfg(feature = "images")]
+    image_cache: Option<ImageCache>,
+    #[cfg(feature = "images")]
+    images_active: bool,  // Runtime flag for whether images are currently enabled
+}
+```
+
 **Tests**:
-- Verify cache initialises when images enabled
-- Verify cache is None when disabled
+- Verify cache initialises when enabled=Always
+- Verify cache initialises when enabled=Auto and terminal supports images
+- Verify cache is None when enabled=Never
+- Verify cache is None when enabled=Auto and terminal doesn't support images
 
 **Success Criteria**:
 - Images can be loaded and decoded
@@ -700,22 +752,28 @@ pub fn render_kitty_image(
     Ok(output)
 }
 
-/// Calculate terminal cell dimensions for image
+/// Calculate terminal cell dimensions for image based on pane size
 pub fn calculate_cell_dimensions(
     image_width: u32,
     image_height: u32,
-    max_width: u16,
-    max_height: u16,
+    pane_width: u16,
+    pane_height: u16,
+    max_width_percent: u8,
+    max_height_percent: u8,
     cell_pixel_width: u16,
     cell_pixel_height: u16,
 ) -> (u16, u16) {
+    // Calculate max cells based on pane size and percentages
+    let max_width = (pane_width as f32 * (max_width_percent as f32 / 100.0)) as u16;
+    let max_height = (pane_height as f32 * (max_height_percent as f32 / 100.0)) as u16;
+
     // Calculate cells needed preserving aspect ratio
     let aspect = image_width as f32 / image_height as f32;
 
     let mut width_cells = (image_width as f32 / cell_pixel_width as f32).ceil() as u16;
     let mut height_cells = (image_height as f32 / cell_pixel_height as f32).ceil() as u16;
 
-    // Clamp to max dimensions
+    // Clamp to max dimensions (percentage of pane)
     if width_cells > max_width {
         width_cells = max_width;
         height_cells = (width_cells as f32 / aspect).ceil() as u16;
@@ -732,9 +790,11 @@ pub fn calculate_cell_dimensions(
 
 **Tests**:
 - Test escape sequence generation
-- Test cell dimension calculation
+- Test cell dimension calculation with pane size
+- Test percentage-based max dimension calculation (90% width, 50% height)
 - Test aspect ratio preservation
-- Test max dimension clamping
+- Test clamping to percentage-based limits
+- Test with various pane sizes (small, medium, large)
 
 #### 6.2: Integrate rendering with UI
 
@@ -744,18 +804,24 @@ Replace placeholder rendering with actual image rendering:
 
 ```rust
 #[cfg(feature = "images")]
-if app.config.images.enabled && backend != DetectedBackend::None {
+if app.images_active && backend != DetectedBackend::None {
     if let Some(image) = find_image_at_line(&app.doc.images, line_idx) {
         // Resolve image source
         if let Some(source) = image.resolve(&app.doc.path) {
             // Load from cache
             if let Ok(cached) = app.image_cache.as_mut().unwrap().load(&source) {
-                // Calculate dimensions
+                // Get current pane dimensions
+                let pane_width = content_area.width;
+                let pane_height = content_area.height;
+
+                // Calculate dimensions based on pane size and percentages
                 let (width_cells, height_cells) = calculate_cell_dimensions(
                     cached.width,
                     cached.height,
-                    app.config.images.max_width,
-                    app.config.images.max_height,
+                    pane_width,
+                    pane_height,
+                    app.config.images.max_width_percent,
+                    app.config.images.max_height_percent,
                     10, // Cell pixel width (estimate, should detect)
                     20, // Cell pixel height (estimate, should detect)
                 );
@@ -996,31 +1062,41 @@ Test in real terminals:
 
 ## Configuration Examples
 
-### Minimal (images disabled)
+### Default (auto-enabled, responsive sizing)
 
 ```yaml
+# Images are enabled automatically if terminal supports them
+# Uses default 90% width, 50% height of pane
 images:
-  enabled: false
+  enabled: auto
+  backend: auto
 ```
 
-### Basic local images
+### Always enabled with custom percentages
 
 ```yaml
 images:
-  enabled: true
+  enabled: always
   backend: auto
-  max_width: 80
-  max_height: 24
+  max_width: 80        # 80% of pane width
+  max_height: 60       # 60% of pane height
+```
+
+### Disabled
+
+```yaml
+images:
+  enabled: never
 ```
 
 ### With remote images and caching
 
 ```yaml
 images:
-  enabled: true
+  enabled: auto
   backend: kitty
-  max_width: 100
-  max_height: 30
+  max_width: 90        # 90% of pane width
+  max_height: 50       # 50% of pane height
   allow_remote: true
   cache_dir: "~/.cache/mdx/images"
 ```
@@ -1091,14 +1167,16 @@ image = { features = ["png", "jpeg", "webp", "gif"] }
 
 The feature is complete when:
 
-1. Images can be enabled/disabled via configuration
-2. Local images render in Kitty terminal
-3. Placeholders work in unsupported terminals
-4. Runtime toggle (I key) works
-5. Performance remains acceptable with many images
-6. Memory usage stays within limits via caching
-7. All tests pass
-8. Documentation updated
+1. Images are automatically enabled on supported terminals (Kitty, iTerm2, Sixel)
+2. Images gracefully fall back to placeholders on unsupported terminals
+3. Image dimensions respect pane size (90% width max, 50% height max)
+4. Images resize responsively when pane is resized
+5. Configuration allows override (always/never/auto)
+6. Runtime toggle (I key) works
+7. Performance remains acceptable with many images
+8. Memory usage stays within limits via caching
+9. All tests pass
+10. Documentation updated
 
 ---
 
