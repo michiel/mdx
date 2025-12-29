@@ -56,6 +56,14 @@ pub struct DecodedImage {
 impl DecodedImage {
     /// Decode image from file path with size constraints
     pub fn from_path(path: &Path, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
+        // Check if file is SVG
+        if let Some(ext) = path.extension() {
+            if ext.eq_ignore_ascii_case("svg") {
+                return Self::from_svg_path(path, max_width, max_height);
+            }
+        }
+
+        // Standard raster image decoding
         use image::GenericImageView;
 
         // Load and decode image
@@ -80,6 +88,52 @@ impl DecodedImage {
         // Convert to RGBA
         let rgba = resized.to_rgba8();
         let data = rgba.into_raw();
+
+        Ok(Self {
+            width,
+            height,
+            data,
+        })
+    }
+
+    /// Decode SVG image from file path with size constraints
+    fn from_svg_path(path: &Path, max_width: u32, max_height: u32) -> anyhow::Result<Self> {
+        use std::fs;
+
+        // Read SVG file
+        let svg_data = fs::read(path)?;
+
+        // Parse SVG
+        let opt = resvg::usvg::Options::default();
+        let tree = resvg::usvg::Tree::from_data(&svg_data, &opt)?;
+
+        // Get SVG dimensions
+        let svg_size = tree.size();
+        let orig_width = svg_size.width() as u32;
+        let orig_height = svg_size.height() as u32;
+
+        // Calculate scaled dimensions
+        let (width, height) = calculate_scaled_dimensions(
+            orig_width,
+            orig_height,
+            max_width,
+            max_height,
+        );
+
+        // Create pixmap for rendering
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+            .ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
+
+        // Render SVG to pixmap
+        let transform = resvg::tiny_skia::Transform::from_scale(
+            width as f32 / orig_width as f32,
+            height as f32 / orig_height as f32,
+        );
+
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+        // Convert to RGBA
+        let data = pixmap.take();
 
         Ok(Self {
             width,

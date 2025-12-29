@@ -11,7 +11,7 @@ default = ["clipboard", "watch", "git"]
 clipboard = ["dep:arboard"]
 watch = ["dep:notify"]
 git = ["dep:similar", "dep:gix", "dep:bstr"]
-images = ["dep:image", "dep:blake3"]
+images = ["dep:image", "dep:blake3", "dep:resvg"]
 
 [dependencies]
 # Core text handling
@@ -42,6 +42,7 @@ bstr = { workspace = true, optional = true }
 # Optional: Images
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 blake3 = { version = "1.5", optional = true }
+resvg = { version = "0.44", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3.14"
