@@ -1900,39 +1900,52 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
         height: popup_height,
     };
 
-    // Build option lines
-    let mut option_lines = vec![
-        Line::from(vec![Span::styled(
-            "Options",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-    ];
+    // Find maximum label width for alignment
+    let max_label_width = dialog.fields.iter()
+        .map(|f| f.label().len())
+        .max()
+        .unwrap_or(0);
+
+    // Build option lines with aligned columns
+    let mut option_lines = vec![];
 
     for (idx, field) in dialog.fields.iter().enumerate() {
         let is_selected = idx == dialog.selected_index;
         let label = field.label();
         let value = dialog.get_value_string(field);
 
-        let line_text = format!("  {}: {}", label, value);
-        let style = if is_selected {
+        // Pad label to max width for alignment
+        let padded_label = format!("{:width$}", label, width = max_label_width);
+
+        let label_style = if is_selected {
             Style::default()
                 .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default()
+            Style::default().fg(Color::White)
         };
 
-        option_lines.push(Line::from(vec![Span::styled(line_text, style)]));
+        let value_style = if is_selected {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+
+        option_lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(padded_label, label_style),
+            Span::raw(": "),
+            Span::styled(value, value_style),
+        ]));
     }
 
     option_lines.push(Line::from(""));
     option_lines.push(Line::from(""));
     option_lines.push(Line::from(vec![
         Span::styled(
-            "Use ↑/↓ to navigate, Space/Enter to toggle, Tab to select button",
+            "↑/↓: navigate  ←/→: change  Tab: select button  Enter: execute",
             Style::default().fg(Color::DarkGray),
         ),
     ]));

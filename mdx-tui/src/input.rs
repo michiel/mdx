@@ -120,19 +120,58 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
                 return Ok(Action::Continue);
             }
 
-            // Space/Enter - toggle current option
+            // Left/Right - toggle current option
             KeyEvent {
-                code: KeyCode::Char(' '),
+                code: KeyCode::Left,
                 modifiers: KeyModifiers::NONE,
                 ..
             }
             | KeyEvent {
-                code: KeyCode::Enter,
+                code: KeyCode::Char('h'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('l'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char(' '),
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 if let Some(ref mut dialog) = app.options_dialog {
                     dialog.toggle_current();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // Enter - execute focused button action
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Some(ref dialog) = app.options_dialog {
+                    match dialog.focused_button {
+                        crate::options_dialog::DialogButton::Cancel => {
+                            app.close_options();
+                        }
+                        crate::options_dialog::DialogButton::Ok => {
+                            app.apply_options();
+                        }
+                        crate::options_dialog::DialogButton::Save => {
+                            if let Err(e) = app.save_options() {
+                                eprintln!("Failed to save options: {}", e);
+                            }
+                        }
+                    }
                 }
                 return Ok(Action::Continue);
             }
