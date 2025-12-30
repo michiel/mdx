@@ -283,6 +283,38 @@ impl Config {
 
         Ok(config_path)
     }
+
+    /// Save configuration to the default config file path
+    /// Overwrites the existing file if it exists
+    pub fn save_to_file(config: &Self) -> Result<()> {
+        let config_path = Self::config_path()
+            .context("Could not determine config file path")?;
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+        }
+
+        // Serialize config to TOML
+        let toml_string = toml::to_string_pretty(config)
+            .context("Failed to serialize config to TOML")?;
+
+        // Write to file
+        std::fs::write(&config_path, toml_string)
+            .with_context(|| format!("Failed to write config file: {}", config_path.display()))?;
+
+        // Set proper permissions (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&config_path)?.permissions();
+            perms.set_mode(0o644); // rw-r--r--
+            std::fs::set_permissions(&config_path, perms)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

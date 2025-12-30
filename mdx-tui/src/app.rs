@@ -62,6 +62,7 @@ pub struct App {
     pub search_matches: Vec<usize>,
     pub search_current_match: Option<usize>,
     pub show_help: bool,
+    pub options_dialog: Option<crate::options_dialog::OptionsDialog>,
     pub security_warnings: Vec<mdx_core::SecurityEvent>,
     pub show_security_warnings: bool,
     #[cfg(feature = "watch")]
@@ -126,6 +127,7 @@ impl App {
             search_matches: Vec::new(),
             search_current_match: None,
             show_help: false,
+            options_dialog: None,
             security_warnings: warnings,
             show_security_warnings,
             #[cfg(feature = "watch")]
@@ -138,6 +140,51 @@ impl App {
     /// Toggle help dialog
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    /// Open options dialog
+    pub fn open_options(&mut self) {
+        self.options_dialog = Some(crate::options_dialog::OptionsDialog::new(&self.config));
+    }
+
+    /// Close options dialog without applying changes
+    pub fn close_options(&mut self) {
+        self.options_dialog = None;
+    }
+
+    /// Apply options from dialog (Ok button)
+    pub fn apply_options(&mut self) {
+        if let Some(dialog) = &self.options_dialog {
+            self.config = dialog.get_config();
+            // Update theme if it changed
+            if self.config.theme != self.theme_variant {
+                self.theme_variant = self.config.theme;
+                self.theme = crate::theme::Theme::for_variant(self.theme_variant);
+            }
+            // Update TOC visibility
+            self.show_toc = self.config.toc.enabled;
+        }
+        self.options_dialog = None;
+    }
+
+    /// Save options to config file (Save button)
+    pub fn save_options(&mut self) -> anyhow::Result<()> {
+        if let Some(dialog) = &self.options_dialog {
+            let new_config = dialog.get_config();
+            // Save to file
+            mdx_core::Config::save_to_file(&new_config)?;
+            // Apply changes
+            self.config = new_config;
+            // Update theme if it changed
+            if self.config.theme != self.theme_variant {
+                self.theme_variant = self.config.theme;
+                self.theme = crate::theme::Theme::for_variant(self.theme_variant);
+            }
+            // Update TOC visibility
+            self.show_toc = self.config.toc.enabled;
+        }
+        self.options_dialog = None;
+        Ok(())
     }
 
     /// Toggle security warnings pane

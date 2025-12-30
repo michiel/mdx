@@ -69,6 +69,137 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
+    // Handle options dialog
+    if app.options_dialog.is_some() {
+        match key {
+            // Esc or Shift+O - close dialog without changes
+            KeyEvent {
+                code: KeyCode::Esc,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('O'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.close_options();
+                return Ok(Action::Continue);
+            }
+
+            // Up/k - move up
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Some(ref mut dialog) = app.options_dialog {
+                    dialog.move_up();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // Down/j - move down
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Some(ref mut dialog) = app.options_dialog {
+                    dialog.move_down();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // Space/Enter - toggle current option
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Some(ref mut dialog) = app.options_dialog {
+                    dialog.toggle_current();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // Tab - cycle through buttons
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Some(ref mut dialog) = app.options_dialog {
+                    dialog.next_button();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // Shift+Tab - cycle backwards through buttons
+            KeyEvent {
+                code: KeyCode::BackTab,
+                ..
+            } => {
+                if let Some(ref mut dialog) = app.options_dialog {
+                    dialog.prev_button();
+                }
+                return Ok(Action::Continue);
+            }
+
+            // c - execute Cancel button
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.close_options();
+                return Ok(Action::Continue);
+            }
+
+            // o - execute Ok button
+            KeyEvent {
+                code: KeyCode::Char('o'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.apply_options();
+                return Ok(Action::Continue);
+            }
+
+            // s - execute Save button
+            KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                if let Err(e) = app.save_options() {
+                    // TODO: Show error message to user
+                    eprintln!("Failed to save options: {}", e);
+                }
+                return Ok(Action::Continue);
+            }
+
+            _ => {
+                // Ignore other keys
+                return Ok(Action::Continue);
+            }
+        }
+    }
+
     // Handle TOC dialog
     if app.show_toc_dialog {
         let dialog_height = viewport_height;
@@ -703,6 +834,19 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         }
     ) {
         app.toggle_help();
+        return Ok(Action::Continue);
+    }
+
+    // O - open options dialog
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('O'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        app.open_options();
         return Ok(Action::Continue);
     }
 

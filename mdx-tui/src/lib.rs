@@ -11,6 +11,7 @@ pub mod app;
 pub mod editor;
 pub mod event;
 pub mod input;
+pub mod options_dialog;
 pub mod panes;
 pub mod render;
 pub mod terminal;

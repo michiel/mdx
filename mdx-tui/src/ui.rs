@@ -84,6 +84,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         render_help_popup(frame, app);
     }
 
+    // Render options dialog if active
+    if app.options_dialog.is_some() {
+        render_options_dialog(frame, app);
+    }
+
     // Render TOC dialog if active
     if app.show_toc_dialog {
         render_toc_dialog(frame, app);
@@ -1869,6 +1874,117 @@ fn render_toc_dialog(frame: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Table of Contents - j/k to navigate, Enter to jump, T/Esc to close ")
+                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        )
+        .style(Style::default().bg(Color::Rgb(30, 34, 42)));
+
+    frame.render_widget(popup, popup_area);
+}
+
+fn render_options_dialog(frame: &mut Frame, app: &App) {
+    use ratatui::widgets::{Clear, Paragraph};
+
+    let Some(ref dialog) = app.options_dialog else {
+        return;
+    };
+
+    // Create a centered popup area
+    let area = frame.area();
+    let popup_width = 60.min(area.width.saturating_sub(4));
+    let popup_height = 25.min(area.height.saturating_sub(4));
+
+    let popup_area = ratatui::layout::Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Build option lines
+    let mut option_lines = vec![
+        Line::from(vec![Span::styled(
+            "Options",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+    ];
+
+    for (idx, field) in dialog.fields.iter().enumerate() {
+        let is_selected = idx == dialog.selected_index;
+        let label = field.label();
+        let value = dialog.get_value_string(field);
+
+        let line_text = format!("  {}: {}", label, value);
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+
+        option_lines.push(Line::from(vec![Span::styled(line_text, style)]));
+    }
+
+    option_lines.push(Line::from(""));
+    option_lines.push(Line::from(""));
+    option_lines.push(Line::from(vec![
+        Span::styled(
+            "Use ↑/↓ to navigate, Space/Enter to toggle, Tab to select button",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // Buttons line
+    let buttons_line = {
+        let cancel_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Cancel) {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let ok_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Ok) {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let save_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Save) {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled("[ Cancel ]", cancel_style),
+            Span::raw("  "),
+            Span::styled("[ Ok ]", ok_style),
+            Span::raw("  "),
+            Span::styled("[ Save ]", save_style),
+        ])
+    };
+
+    option_lines.push(buttons_line);
+
+    // Clear the background
+    frame.render_widget(Clear, popup_area);
+
+    // Render the popup
+    let popup = Paragraph::new(option_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Options - Press O or Esc to close ")
                 .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         )
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
