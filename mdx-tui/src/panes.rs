@@ -1,4 +1,61 @@
 //! Pane management and split tree
+//!
+//! This module implements a flexible split pane system using a binary tree structure.
+//! Each pane can display a document, and panes can be split horizontally or vertically
+//! to create complex layouts.
+//!
+//! # Architecture
+//!
+//! The pane system is built around two key concepts:
+//!
+//! ## 1. PaneNode Tree (Layout Structure)
+//!
+//! A recursive binary tree that defines the layout:
+//!
+//! ```text
+//! PaneNode::Split                     Visual Layout:
+//!   ├─ dir: Vertical                  ┌─────┬─────┐
+//!   ├─ ratio: 0.5                     │  0  │  1  │
+//!   ├─ left: Leaf(0)                  │     │     │
+//!   └─ right: Leaf(1)                 └─────┴─────┘
+//!
+//! PaneNode::Split                     Visual Layout:
+//!   ├─ dir: Horizontal                ┌───────────┐
+//!   ├─ ratio: 0.6                     │     0     │
+//!   ├─ left: Leaf(0)                  ├───────────┤
+//!   └─ right: Split                   │  1  │  2  │
+//!       ├─ dir: Vertical              │     │     │
+//!       ├─ ratio: 0.5                 └─────┴─────┘
+//!       ├─ left: Leaf(1)
+//!       └─ right: Leaf(2)
+//! ```
+//!
+//! - **Leaf nodes** represent individual panes (identified by PaneId)
+//! - **Split nodes** divide space between two child nodes
+//! - **ratio** (0.0-1.0) determines how much space the left/top child gets
+//!
+//! ## 2. PaneManager (Storage & Coordination)
+//!
+//! The `PaneManager` coordinates between the tree structure and actual pane data:
+//!
+//! - **root**: PaneNode tree defining layout
+//! - **panes**: HashMap<PaneId, Pane> storing pane state (view, document)
+//! - **focused**: PaneId of currently active pane
+//! - **next_id**: Counter for generating unique pane IDs
+//!
+//! ## Key Operations
+//!
+//! - **split_focused()**: Replaces focused leaf with a Split node containing two leaves
+//! - **close_focused()**: Removes a pane and collapses its parent split
+//! - **compute_layout()**: Recursively calculates Rect for each pane given terminal area
+//! - **move_focus()**: Finds nearest pane in a direction using geometric distance
+//!
+//! ## Invariants
+//!
+//! 1. Every PaneId in the tree has a corresponding entry in the panes HashMap
+//! 2. The focused PaneId always exists in both the tree and panes HashMap
+//! 3. Split nodes always have exactly two children
+//! 4. The tree always contains at least one Leaf node
 
 use crate::app::ViewState;
 use ratatui::layout::Rect;
@@ -250,26 +307,37 @@ impl PaneManager {
     }
 
     /// Remove a leaf from the tree, collapsing its parent split
+    ///
+    /// When a pane is closed, we need to remove it from the tree and collapse
+    /// its parent split node. The sibling pane takes the place of the split.
+    ///
+    /// Example:
+    /// ```text
+    /// Before:                After (removing pane 1):
+    /// Split(0.5)             Leaf(0)
+    ///   ├─ Leaf(0)
+    ///   └─ Leaf(1) ← remove
+    /// ```
     fn remove_leaf_from_tree(&self, node: PaneNode, target_id: PaneId) -> PaneNode {
         match node {
             PaneNode::Leaf(id) if id == target_id => {
-                // This shouldn't happen if called correctly
+                // This shouldn't happen if called correctly (parent should handle removal)
                 node
             }
             PaneNode::Leaf(_) => node,
             PaneNode::Split { dir, left, right, ratio } => {
-                // Check if target is in left or right
+                // Check if target is in left or right subtree
                 let left_ids = left.leaf_ids();
                 let right_ids = right.leaf_ids();
 
                 if left_ids.contains(&target_id) && left_ids.len() == 1 {
-                    // Left is the target leaf, promote right
+                    // Left child is the target leaf - promote right child
                     *right
                 } else if right_ids.contains(&target_id) && right_ids.len() == 1 {
-                    // Right is the target leaf, promote left
+                    // Right child is the target leaf - promote left child
                     *left
                 } else {
-                    // Target is deeper in the tree, recurse
+                    // Target is deeper in the tree - recurse into both sides
                     let new_left = self.remove_leaf_from_tree(*left, target_id);
                     let new_right = self.remove_leaf_from_tree(*right, target_id);
                     PaneNode::Split {
@@ -284,13 +352,19 @@ impl PaneManager {
     }
 
     /// Move focus to the next pane in the given direction
+    ///
+    /// Uses a geometric approach: finds the nearest pane (by Euclidean distance)
+    /// whose center point is in the requested direction from the current pane's center.
+    ///
+    /// This handles complex layouts better than tree-based navigation, as it works
+    /// correctly even when panes are created by multiple split operations.
     pub fn move_focus(&mut self, direction: Direction, layout: &HashMap<PaneId, Rect>) {
         let current_rect = match layout.get(&self.focused) {
             Some(r) => r,
             None => return,
         };
 
-        // Find the pane center
+        // Calculate center point of current pane
         let current_center = (
             current_rect.x + current_rect.width / 2,
             current_rect.y + current_rect.height / 2,
@@ -305,9 +379,10 @@ impl PaneManager {
                 continue;
             }
 
+            // Calculate center point of candidate pane
             let center = (rect.x + rect.width / 2, rect.y + rect.height / 2);
 
-            // Check if this pane is in the right direction
+            // Check if this pane is in the requested direction
             let in_direction = match direction {
                 Direction::Up => center.1 < current_center.1,
                 Direction::Down => center.1 > current_center.1,
@@ -319,7 +394,7 @@ impl PaneManager {
                 continue;
             }
 
-            // Calculate distance
+            // Calculate Euclidean distance squared (no need for sqrt for comparison)
             let dx = (center.0 as i32 - current_center.0 as i32).abs() as u32;
             let dy = (center.1 as i32 - current_center.1 as i32).abs() as u32;
             let distance = dx * dx + dy * dy;
@@ -330,6 +405,7 @@ impl PaneManager {
             }
         }
 
+        // Update focus if we found a pane in the requested direction
         if let Some(new_focus) = best_pane {
             self.focused = new_focus;
         }
@@ -374,7 +450,9 @@ mod tests {
             PaneNode::Split { dir, .. } => {
                 assert_eq!(*dir, SplitDir::Vertical);
             }
-            _ => panic!("Expected split node"),
+            _ => {
+                assert!(false, "Expected split node, got leaf");
+            }
         }
     }
 

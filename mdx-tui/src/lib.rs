@@ -88,9 +88,7 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
 
                             // Handle editor errors (after terminal is restored)
                             if let Err(e) = editor_result {
-                                // TODO: Show error in status bar
-                                // For now, just continue silently
-                                eprintln!("Editor error: {}", e);
+                                app.set_error_message(format!("Editor error: {}", e));
                             }
                         }
                         input::Action::Quit => {

@@ -17,19 +17,17 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     use gix::discover;
 
     // Get the absolute path of the file
-    let abs_path = path.canonicalize().ok();
-    if abs_path.is_none() {
-        return Ok(None);
-    }
-    let abs_path = abs_path.unwrap();
+    let abs_path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
 
     // Try to discover and open repository (use parent directory for discovery)
     let discover_path = abs_path.parent().unwrap_or(&abs_path);
-    let repo = discover(discover_path);
-    if repo.is_err() {
-        return Ok(None);
-    }
-    let repo = repo.unwrap();
+    let repo = match discover(discover_path) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
 
     // Get working directory
     let workdir = match repo.workdir() {
@@ -38,11 +36,10 @@ pub fn open_repo_for_path(path: &Path) -> Result<Option<RepoContext>> {
     };
 
     // Compute relative path from workdir to file
-    let rel_path = abs_path.strip_prefix(&workdir).ok();
-    if rel_path.is_none() {
-        return Ok(None);
-    }
-    let rel_path = rel_path.unwrap().to_path_buf();
+    let rel_path = match abs_path.strip_prefix(&workdir) {
+        Ok(p) => p.to_path_buf(),
+        Err(_) => return Ok(None),
+    };
 
     // Check if file is gitignored
     if is_path_ignored(&repo, &rel_path) {
@@ -93,48 +90,35 @@ pub fn read_head_file_text(repo: &gix::Repository, rel_path: &Path) -> Result<Op
     use bstr::ByteSlice;
 
     // Get HEAD reference
-    let head = repo.head();
-    if head.is_err() {
-        // No HEAD (unborn)
-        return Ok(None);
-    }
-    let mut head = head.unwrap();
+    let mut head = match repo.head() {
+        Ok(h) => h,
+        Err(_) => return Ok(None), // No HEAD (unborn)
+    };
 
     // Try to peel to commit
-    let commit = head.peel_to_commit();
-    if commit.is_err() {
-        // Unborn HEAD or invalid
-        return Ok(None);
-    }
-    let commit = commit.unwrap();
+    let commit = match head.peel_to_commit() {
+        Ok(c) => c,
+        Err(_) => return Ok(None), // Unborn HEAD or invalid
+    };
 
     // Get tree
-    let tree = commit.tree();
-    if tree.is_err() {
-        return Ok(None);
-    }
-    let tree = tree.unwrap();
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
 
     // Lookup entry by path (use Path directly, not BString)
-    let entry = tree.lookup_entry_by_path(rel_path);
-    if entry.is_err() {
-        // File not in tree (new file)
-        return Ok(Some(String::new()));
-    }
-    let entry = entry.unwrap();
-
-    if entry.is_none() {
-        // File not found
-        return Ok(Some(String::new()));
-    }
-    let entry = entry.unwrap();
+    let entry = match tree.lookup_entry_by_path(rel_path) {
+        Ok(Some(e)) => e,
+        Ok(None) => return Ok(Some(String::new())), // File not found
+        Err(_) => return Ok(Some(String::new())),   // File not in tree (new file)
+    };
 
     // Get the object
-    let object = entry.object();
-    if object.is_err() {
-        return Ok(None);
-    }
-    let object = object.unwrap();
+    let object = match entry.object() {
+        Ok(obj) => obj,
+        Err(_) => return Ok(None),
+    };
 
     // Read blob data
     let data = object.data.as_slice();
@@ -155,11 +139,10 @@ pub fn read_head_file_text(_repo: &gix::Repository, _rel_path: &Path) -> Result<
 #[cfg(feature = "git")]
 pub fn get_base_text_gix(file_path: &Path) -> Result<Option<String>> {
     // Open repository
-    let repo_ctx = open_repo_for_path(file_path)?;
-    if repo_ctx.is_none() {
-        return Ok(None);
-    }
-    let repo_ctx = repo_ctx.unwrap();
+    let repo_ctx = match open_repo_for_path(file_path)? {
+        Some(ctx) => ctx,
+        None => return Ok(None),
+    };
 
     // Read file from HEAD
     read_head_file_text(&repo_ctx.repo, &repo_ctx.rel_path)

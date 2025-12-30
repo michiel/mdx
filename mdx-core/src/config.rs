@@ -171,7 +171,7 @@ impl Config {
     /// Load configuration from file, falling back to defaults if missing
     /// Returns (Config, Vec<SecurityEvent>) where events track security-related settings
     pub fn load() -> Result<(Self, Vec<SecurityEvent>)> {
-        let mut warnings = Vec::new();
+        let warnings = Vec::new();
         let config_path = Self::config_path();
 
         if let Some(path) = config_path {

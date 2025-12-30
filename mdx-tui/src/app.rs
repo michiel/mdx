@@ -42,6 +42,14 @@ impl ViewState {
     }
 }
 
+/// Type of status message
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusMessageKind {
+    Info,
+    Success,
+    Error,
+}
+
 /// Main application state
 pub struct App {
     pub config: Config,
@@ -65,6 +73,7 @@ pub struct App {
     pub options_dialog: Option<crate::options_dialog::OptionsDialog>,
     pub security_warnings: Vec<mdx_core::SecurityEvent>,
     pub show_security_warnings: bool,
+    pub status_message: Option<(String, StatusMessageKind)>,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -130,11 +139,32 @@ impl App {
             options_dialog: None,
             security_warnings: warnings,
             show_security_warnings,
+            status_message: None,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
             diff_worker,
         }
+    }
+
+    /// Set an error message to display in the status bar
+    pub fn set_error_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some((message.into(), StatusMessageKind::Error));
+    }
+
+    /// Set a success message to display in the status bar
+    pub fn set_success_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some((message.into(), StatusMessageKind::Success));
+    }
+
+    /// Set an info message to display in the status bar
+    pub fn set_info_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some((message.into(), StatusMessageKind::Info));
+    }
+
+    /// Clear the status message
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
     }
 
     /// Toggle help dialog

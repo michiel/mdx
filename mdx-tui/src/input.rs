@@ -15,6 +15,12 @@ pub enum Action {
 
 /// Handle a key event with viewport dimensions for scroll commands
 pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewport_width: usize) -> Result<Action> {
+    // Clear status message on any keystroke (except pure modifiers)
+    // This ensures messages don't persist indefinitely
+    if !matches!(key.code, KeyCode::Modifier(_)) {
+        app.clear_status_message();
+    }
+
     // Handle close pane with 'q' - quit if last pane
     if matches!(
         key,
@@ -225,9 +231,13 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                if let Err(e) = app.save_options() {
-                    // TODO: Show error message to user
-                    eprintln!("Failed to save options: {}", e);
+                match app.save_options() {
+                    Ok(()) => {
+                        app.set_success_message("Configuration saved successfully");
+                    }
+                    Err(e) => {
+                        app.set_error_message(format!("Failed to save options: {}", e));
+                    }
                 }
                 return Ok(Action::Continue);
             }

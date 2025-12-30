@@ -956,11 +956,70 @@ fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Optio
         i += 1;
     }
 
-    // TODO: Apply search highlighting on top of syntax highlighting
-    // This is complex as it requires re-parsing with highlight preservation
-    let _ = search_query;
+    // Apply search highlighting on top of syntax highlighting
+    if let Some(query) = search_query {
+        if !query.is_empty() {
+            spans = apply_search_highlighting_to_spans(spans, query);
+        }
+    }
 
     spans
+}
+
+/// Apply search highlighting on top of existing styled spans
+/// Preserves the original foreground color but adds yellow background for matches
+fn apply_search_highlighting_to_spans(spans: Vec<Span<'static>>, query: &str) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+    let query_lower = query.to_lowercase();
+
+    for span in spans {
+        let text = span.content.to_string();
+        let text_lower = text.to_lowercase();
+
+        // Find all matches in this span
+        let mut last_end = 0;
+        let mut has_match = false;
+
+        for (idx, _) in text_lower.match_indices(&query_lower) {
+            has_match = true;
+
+            // Add text before match (if any) with original style
+            if idx > last_end {
+                result.push(Span::styled(
+                    text[last_end..idx].to_string(),
+                    span.style,
+                ));
+            }
+
+            // Add highlighted match - preserve fg color, add yellow bg
+            let match_style = span.style
+                .bg(Color::Yellow)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD);
+
+            result.push(Span::styled(
+                text[idx..idx + query.len()].to_string(),
+                match_style,
+            ));
+
+            last_end = idx + query.len();
+        }
+
+        if has_match {
+            // Add remaining text after last match (if any) with original style
+            if last_end < text.len() {
+                result.push(Span::styled(
+                    text[last_end..].to_string(),
+                    span.style,
+                ));
+            }
+        } else {
+            // No match in this span, keep it as-is
+            result.push(span);
+        }
+    }
+
+    result
 }
 
 /// Highlight text matches within a string
@@ -1714,6 +1773,30 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         String::new()
     };
 
+    // If there's a status message, display it prominently
+    if let Some((message, kind)) = &app.status_message {
+        use ratatui::style::Color;
+
+        let (fg_color, bg_color, prefix) = match kind {
+            crate::app::StatusMessageKind::Error => (Color::White, Color::Red, "ERROR: "),
+            crate::app::StatusMessageKind::Success => (Color::Black, Color::Green, "SUCCESS: "),
+            crate::app::StatusMessageKind::Info => (Color::Black, Color::Cyan, "INFO: "),
+        };
+
+        let status_text = format!(" {}{}", prefix, message);
+        let status = Paragraph::new(Line::from(vec![Span::styled(
+            status_text,
+            Style::default()
+                .fg(fg_color)
+                .bg(bg_color)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        frame.render_widget(status, area);
+        return;
+    }
+
+    // Normal status bar
     let status_text = format!(
         " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}{}",
         filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str, search_str
