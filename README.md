@@ -6,25 +6,25 @@ A fast, terminal-based Markdown viewer and editor launcher built in Rust. Design
 
 ### Rendering and Display
 
-- **Fast rendering** - Low-latency display optimised for large Markdown files
-- **High-quality Markdown** - Supports headings, lists, tables, code blocks with syntax highlighting, and inline formatting
-- **Git diff gutter** - Visual indicators showing added, modified, and deleted lines compared to git HEAD or index
-- **Dual themes** - Toggle between dark and light colour schemes
-- **Split panes** - View multiple sections simultaneously with horizontal and vertical splits
+  - **Fast rendering** - Low-latency display optimised for large Markdown files
+  - **High-quality Markdown** - Supports headings, lists, tables, code blocks with syntax highlighting, and inline formatting
+  - **Git diff gutter** - Visual indicators showing added, modified, and deleted lines compared to git HEAD or index
+  - **Dual themes** - Toggle between dark and light colour schemes
+  - **Split panes** - View multiple sections simultaneously with horizontal and vertical splits
 
 ### Navigation and Editing
 
-- **Vim-style navigation** - Familiar keybindings (`hjkl`, `gg`, `G`, `Ctrl-u`, `Ctrl-d`, `/`, `n`, `N`)
-- **Table of contents** - Sidebar with document outline and quick heading navigation
-- **Visual line mode** - Select and yank multiple lines to clipboard
-- **Search** - Forward search with next/previous match navigation
-- **External editor** - Launch your preferred editor at the current line
+  - **Vim-style navigation** - Familiar keybindings (`hjkl`, `gg`, `G`, `Ctrl-u`, `Ctrl-d`, `/`, `n`, `N`)
+  - **Table of contents** - Sidebar with document outline and quick heading navigation
+  - **Visual line mode** - Select and yank multiple lines to clipboard
+  - **Search** - Forward search with next/previous match navigation
+  - **External editor** - Launch your preferred editor at the current line
 
 ### File Management
 
-- **File watching** - Automatic detection of on-disk changes with optional auto-reload
-- **Multi-document** - Open multiple files in split panes
-- **Cross-platform** - Works on Linux, macOS, and Windows
+  - **File watching** - Automatic detection of on-disk changes with optional auto-reload
+  - **Multi-document** - Open multiple files in split panes
+  - **Cross-platform** - Works on Linux, macOS, and Windows
 
 ## Installation
 
