@@ -513,10 +513,20 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         let mut current_width = 0;
         let mut current_line_spans: Vec<Span> = Vec::new();
         let mut first_segment = true;
+        let mut prev_was_bullet = false;
 
         for span in line.spans {
             let span_text = span.content.to_string();
             let span_width = span_text.chars().count();
+
+            // Detect if this span is a bullet marker
+            let is_bullet_span = list_continuation_indent.is_some() &&
+                span_width <= 5 && // Bullets are short: "• ", "- ", "1. ", "100. " etc.
+                (span_text.starts_with('•') ||
+                 span_text.starts_with('-') ||
+                 span_text.starts_with('*') ||
+                 span_text.starts_with('+') ||
+                 span_text.chars().next().map_or(false, |c| c.is_ascii_digit()));
 
             if current_width + span_width <= available_width {
                 // Fits on current line
@@ -536,7 +546,10 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     current_width.saturating_sub(indent_width)
                 };
 
-                let should_wrap = if !current_line_spans.is_empty() {
+                // Never wrap immediately after a bullet - keep bullet with at least some content
+                let should_wrap = if prev_was_bullet {
+                    false // Force keeping content with bullet
+                } else if !current_line_spans.is_empty() {
                     // If the span is short and we have little content, try to keep them together
                     // by not wrapping yet (let the span overflow and wrap within itself)
                     if span_is_short && current_content_width < 20 {
@@ -646,6 +659,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     }
                 }
             }
+
+            // Update prev_was_bullet for the next iteration
+            prev_was_bullet = is_bullet_span;
         }
 
         if !current_line_spans.is_empty() {
@@ -1932,6 +1948,7 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  Ctrl+w v          Split vertically"),
         Line::from("  Ctrl+w hjkl/↑↓←→  Move focus between panes"),
         Line::from("  Ctrl+↑↓←→         Move focus between panes"),
+        Line::from("  q                 Close pane (quit if last)"),
         Line::from(""),
         Line::from(vec![
             Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
@@ -1939,11 +1956,12 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  t                 Toggle TOC sidebar"),
         Line::from("  T                 Open TOC dialog (full screen)"),
         Line::from("  M                 Toggle theme (dark/light)"),
+        Line::from("  O                 Open options dialog"),
+        Line::from("  W                 Toggle security warnings pane"),
         Line::from("  e                 Open in $EDITOR"),
         Line::from("  r                 Toggle raw/rendered mode"),
         Line::from("  R                 Reload document"),
         Line::from("  ?                 Toggle this help"),
-        Line::from("  q                 Close pane (quit if last)"),
         Line::from("  Ctrl+C            Force quit"),
     ];
 

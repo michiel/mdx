@@ -17,6 +17,7 @@ pub enum OptionField {
     TocWidth,
     SafeMode,
     NoExec,
+    Utf8Graphics,
     #[cfg(feature = "watch")]
     WatchEnabled,
     #[cfg(feature = "watch")]
@@ -36,6 +37,7 @@ impl OptionField {
             OptionField::TocWidth,
             OptionField::SafeMode,
             OptionField::NoExec,
+            OptionField::Utf8Graphics,
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled,
             #[cfg(feature = "watch")]
@@ -55,6 +57,7 @@ impl OptionField {
             OptionField::TocWidth => "TOC Width",
             OptionField::SafeMode => "Safe Mode",
             OptionField::NoExec => "No Exec",
+            OptionField::Utf8Graphics => "UTF-8 Graphics",
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => "File Watching",
             #[cfg(feature = "watch")]
@@ -135,6 +138,9 @@ impl OptionsDialog {
             OptionField::NoExec => {
                 self.editing_config.security.no_exec = !self.editing_config.security.no_exec;
             }
+            OptionField::Utf8Graphics => {
+                self.editing_config.render.use_utf8_graphics = !self.editing_config.render.use_utf8_graphics;
+            }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => {
                 self.editing_config.watch.enabled = !self.editing_config.watch.enabled;
@@ -162,6 +168,7 @@ impl OptionsDialog {
             OptionField::TocWidth => format!("{}", self.editing_config.toc.width),
             OptionField::SafeMode => format!("{}", self.editing_config.security.safe_mode),
             OptionField::NoExec => format!("{}", self.editing_config.security.no_exec),
+            OptionField::Utf8Graphics => format!("{}", self.editing_config.render.use_utf8_graphics),
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => format!("{}", self.editing_config.watch.enabled),
             #[cfg(feature = "watch")]
