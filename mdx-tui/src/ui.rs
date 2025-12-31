@@ -234,7 +234,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let mut list_item_indents: Vec<Option<usize>> = Vec::new(); // Track list item continuation indent
     // Account for borders (top and bottom borders take 2 lines)
     let content_height = content_area.height.saturating_sub(2) as usize;
-    let visible_end = (scroll + content_height).min(line_count);
+    let mut visible_end = (scroll + content_height).min(line_count);
     let mut is_first_code_line = false;
 
     let mut line_idx = scroll;
@@ -337,7 +337,11 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 code_block_indent = 0;
             }
             in_code_block = !in_code_block;
-            // Skip this line entirely (don't render fence markers)
+            // Skip this line entirely (don't render fence markers).
+            // Expand visible range so skipped fences don't leave empty space.
+            if visible_end < line_count {
+                visible_end += 1;
+            }
             line_idx += 1;
             continue;
         }
@@ -546,9 +550,10 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     current_width.saturating_sub(indent_width)
                 };
 
-                // Never wrap immediately after a bullet - keep bullet with at least some content
-                let should_wrap = if prev_was_bullet {
-                    false // Force keeping content with bullet
+                // Never wrap immediately after a bullet or before adding any content
+                // Keep bullet with content, and don't create empty lines
+                let should_wrap = if prev_was_bullet || current_content_width == 0 {
+                    false // Force keeping content with bullet, or don't create empty lines
                 } else if !current_line_spans.is_empty() {
                     // If the span is short and we have little content, try to keep them together
                     // by not wrapping yet (let the span overflow and wrap within itself)
@@ -637,25 +642,33 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                             (split_at, split_at)
                         };
 
-                        let (chunk, rest) = remaining.split_at(split_pos.0);
-                        let rest = &rest[split_pos.1 - split_pos.0..];
+                        // Safety: ensure we consume at least one character to avoid infinite loops
+                        let safe_split_pos = if split_pos.0 == 0 && !remaining.is_empty() {
+                            let first_char_len = remaining.chars().next().unwrap().len_utf8();
+                            (first_char_len, first_char_len)
+                        } else {
+                            split_pos
+                        };
+
+                        let (chunk, rest) = remaining.split_at(safe_split_pos.0);
+                        let rest = &rest[safe_split_pos.1 - safe_split_pos.0..];
 
                         if !chunk.is_empty() {
                             current_line_spans.push(Span::styled(
                                 chunk.to_string(),
                                 span.style
                             ));
-                        }
+                            wrapped_lines.push(Line::from(current_line_spans.clone()));
+                            current_line_spans.clear();
 
-                        wrapped_lines.push(Line::from(current_line_spans.clone()));
-                        current_line_spans.clear();
-                        // For list items, add extra indent to align with content after marker
-                        let extra_indent = list_continuation_indent.unwrap_or(0);
-                        let total_indent = content_start + extra_indent;
-                        current_line_spans.push(Span::raw(" ".repeat(total_indent)));
-                        current_width = total_indent;
+                            // For list items, add extra indent to align with content after marker
+                            let extra_indent = list_continuation_indent.unwrap_or(0);
+                            let total_indent = content_start + extra_indent;
+                            current_line_spans.push(Span::raw(" ".repeat(total_indent)));
+                            current_width = total_indent;
+                            first_segment = false;
+                        }
                         remaining = rest;
-                        first_segment = false;
                     }
                 }
             }

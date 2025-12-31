@@ -5,6 +5,9 @@
 
 use mdx_core::{Config, Document};
 use mdx_tui::App;
+use mdx_tui::ui;
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
 use std::io::Write as _;
 use tempfile::NamedTempFile;
 
@@ -356,4 +359,38 @@ fn integration_multi_pane_independence() {
 
     let pane_after = app.panes.focused_pane().unwrap();
     assert!(pane_after.view.cursor_line >= cursor_before);
+}
+
+#[test]
+fn integration_render_fills_viewport_when_skipping_fences() {
+    let content = "```\nline1\nline2\nline3\nline4\nline5\nline6\nline7\n```\nline8\n";
+    let (mut app, _file) = create_test_app(content);
+
+    let width: u16 = 80;
+    let height: u16 = 12;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("Failed to create terminal");
+
+    terminal
+        .draw(|frame| ui::draw(frame, &mut app))
+        .expect("Failed to draw frame");
+
+    let buffer = terminal.backend().buffer();
+    let content_area_height = height.saturating_sub(2);
+    let content_area_y = 1;
+    let last_content_row = content_area_y + content_area_height.saturating_sub(2);
+
+    let mut row_has_digit = false;
+    for x in 0..width {
+        let symbol = buffer.get(x, last_content_row).symbol();
+        if symbol.chars().any(|c| c.is_ascii_digit()) {
+            row_has_digit = true;
+            break;
+        }
+    }
+
+    assert!(
+        row_has_digit,
+        "expected the last content row to include line numbers"
+    );
 }
