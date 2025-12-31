@@ -84,6 +84,7 @@ impl App {
     /// Create a new application instance with a document and security warnings
     pub fn new(config: Config, doc: Document, warnings: Vec<mdx_core::SecurityEvent>) -> Self {
         let mut config = config;
+        #[cfg(feature = "images")]
         if config.security.safe_mode {
             config.images.enabled = false;
         }

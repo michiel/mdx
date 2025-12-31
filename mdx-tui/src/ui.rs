@@ -98,7 +98,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 fn sanitize_for_terminal(input: &str) -> String {
     input
         .chars()
-        .filter(|&c| c == '\n' || c == '\t' || (c >= ' ' && c < '\x7f'))
+        .filter(|&c| {
+            // Allow newline, tab, and printable characters (including UTF-8)
+            // Exclude C0 and C1 control characters except \n and \t
+            c == '\n' || c == '\t' || (c >= ' ' && c != '\x7f' && (c < '\u{80}' || c > '\u{9f}'))
+        })
         .collect()
 }
 
@@ -395,7 +399,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
-            line_spans.extend(style_markdown_line(&line_text, &app.theme, search_query.as_deref()));
+            line_spans.extend(style_markdown_line(&line_text, &app.theme, &app.config.render, search_query.as_deref()));
             is_code_block_line = false;
         }
 
@@ -1208,13 +1212,14 @@ fn compute_table_widths(rows: &[Vec<String>], content_width: usize) -> Vec<usize
     widths
 }
 
-fn build_table_separator_cell(width: usize, raw: &str) -> String {
+fn build_table_separator_cell(width: usize, raw: &str, use_utf8: bool) -> String {
     if width == 0 {
         return String::new();
     }
 
     let trimmed = raw.trim();
-    let mut cell: Vec<char> = vec!['-'; width];
+    let fill_char = if use_utf8 { '─' } else { '-' };
+    let mut cell: Vec<char> = vec![fill_char; width];
     if trimmed.starts_with(':') {
         cell[0] = ':';
     }
@@ -1327,13 +1332,14 @@ fn render_table_block(
                 line_spans.push(Span::raw(indent_str.clone()));
             }
 
-            line_spans.push(Span::styled("|".to_string(), Style::default().fg(Color::Cyan)));
+            let separator_char = if app.config.render.use_utf8_graphics { "│" } else { "|" };
+            line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
 
             for (col_idx, width) in widths.iter().enumerate() {
                 line_spans.push(Span::raw(" ".to_string()));
 
                 if is_separator {
-                    let cell_text = build_table_separator_cell(*width, &padded_cells[col_idx]);
+                    let cell_text = build_table_separator_cell(*width, &padded_cells[col_idx], app.config.render.use_utf8_graphics);
                     line_spans.push(Span::styled(
                         cell_text,
                         Style::default().fg(Color::DarkGray),
@@ -1356,7 +1362,7 @@ fn render_table_block(
                 }
 
                 line_spans.push(Span::raw(" ".to_string()));
-                line_spans.push(Span::styled("|".to_string(), Style::default().fg(Color::Cyan)));
+                line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
             }
 
             let mut line = Line::from(line_spans);
@@ -1408,7 +1414,7 @@ fn detect_list_item_indent(line: &str) -> Option<usize> {
     None
 }
 
-fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
+fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &mdx_core::config::RenderConfig, search_query: Option<&str>) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
     // Check for horizontal rule
@@ -1417,8 +1423,14 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Op
         || (trimmed.chars().all(|c| c == '*') && trimmed.len() >= 3)
         || (trimmed.chars().all(|c| c == '_') && trimmed.len() >= 3)
     {
+        let rule_text = if render_config.use_utf8_graphics {
+            // Use UTF-8 box-drawing horizontal line
+            "─".repeat(trimmed.len())
+        } else {
+            line.to_string()
+        };
         spans.push(Span::styled(
-            line.to_string(),
+            rule_text,
             Style::default().fg(Color::DarkGray),
         ));
         return spans;
@@ -1430,16 +1442,56 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Op
         let parts: Vec<&str> = line.split('|').collect();
         for (i, part) in parts.iter().enumerate() {
             if i > 0 {
+                let separator = if render_config.use_utf8_graphics {
+                    "│" // UTF-8 box-drawing vertical line
+                } else {
+                    "|"
+                };
                 spans.push(Span::styled(
-                    "|".to_string(),
+                    separator.to_string(),
                     Style::default().fg(Color::Cyan),
                 ));
             }
             // Check if this is a separator row (contains only -, :, and spaces)
             let is_separator = part.trim().chars().all(|c| c == '-' || c == ':' || c == ' ');
             if is_separator && !part.trim().is_empty() {
+                let separator_text = if render_config.use_utf8_graphics {
+                    // Convert alignment markers to UTF-8 table separators
+                    let trimmed = part.trim();
+                    let left_align = trimmed.starts_with(':');
+                    let right_align = trimmed.ends_with(':');
+
+                    let leading_spaces = part.len() - part.trim_start().len();
+                    let trailing_spaces = part.len().saturating_sub(leading_spaces + trimmed.len());
+
+                    let mut result = String::new();
+                    if leading_spaces > 0 {
+                        result.push_str(&" ".repeat(leading_spaces));
+                    }
+
+                    if left_align && right_align {
+                        result.push(':');
+                        result.push_str(&"─".repeat(trimmed.len().saturating_sub(2)));
+                        result.push(':');
+                    } else if left_align {
+                        result.push(':');
+                        result.push_str(&"─".repeat(trimmed.len().saturating_sub(1)));
+                    } else if right_align {
+                        result.push_str(&"─".repeat(trimmed.len().saturating_sub(1)));
+                        result.push(':');
+                    } else {
+                        result.push_str(&"─".repeat(trimmed.len()));
+                    }
+
+                    if trailing_spaces > 0 {
+                        result.push_str(&" ".repeat(trailing_spaces));
+                    }
+                    result
+                } else {
+                    part.to_string()
+                };
                 spans.push(Span::styled(
-                    part.to_string(),
+                    separator_text,
                     Style::default().fg(Color::DarkGray),
                 ));
             } else {
@@ -1480,8 +1532,19 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, search_query: Op
             spans.push(Span::raw(" ".repeat(indent)));
         }
         // Add list marker with special color
+        let display_marker = if render_config.use_utf8_graphics {
+            // Use UTF-8 bullets for unordered lists
+            if marker.starts_with('-') || marker.starts_with('*') || marker.starts_with('+') {
+                "• ".to_string() // UTF-8 bullet point
+            } else {
+                // Keep numbered list markers as-is
+                marker.to_string()
+            }
+        } else {
+            marker.to_string()
+        };
         spans.push(Span::styled(
-            marker.to_string(),
+            display_marker,
             Style::default().fg(Color::Yellow),
         ));
         // Style the rest as inline markdown
@@ -2376,6 +2439,19 @@ mod security_tests {
         assert!(!output.contains('\x07'));
     }
 
+    #[test]
+    fn security_allows_utf8_characters() {
+        // Test that UTF-8 box-drawing characters are preserved
+        let input = "│─┌┐└┘• Text";
+        let output = sanitize_for_terminal(input);
+        assert_eq!(input, output, "UTF-8 characters should be preserved");
+
+        // Verify specific characters
+        assert!(output.contains('│'));
+        assert!(output.contains('─'));
+        assert!(output.contains('•'));
+    }
+
     #[cfg(feature = "images")]
     #[test]
     fn security_image_size_limit_blocks_metadata() {
@@ -2399,5 +2475,182 @@ mod security_tests {
             .unwrap();
 
         assert!(result.is_none());
+    }
+}
+
+#[cfg(test)]
+mod utf8_rendering_tests {
+    use super::style_markdown_line;
+    use crate::theme::Theme;
+    use mdx_core::config::Config;
+    use ratatui::style::Color;
+
+    fn get_text_from_spans(spans: &[ratatui::text::Span]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn test_horizontal_rule_utf8() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let line = "---";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should be UTF-8 horizontal lines
+        assert_eq!(output, "───");
+    }
+
+    #[test]
+    fn test_horizontal_rule_ascii() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = false;
+
+        let line = "---";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should remain as ASCII
+        assert_eq!(output, "---");
+    }
+
+    #[test]
+    fn test_table_separator_utf8() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let line = "| Header 1 | Header 2 |";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should use UTF-8 vertical bars
+        assert!(output.contains('│'));
+        assert!(!output.contains('|'));
+    }
+
+    #[test]
+    fn test_table_separator_ascii() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = false;
+
+        let line = "| Header 1 | Header 2 |";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should remain as ASCII pipe
+        assert!(output.contains('|'));
+        assert!(!output.contains('│'));
+    }
+
+    #[test]
+    fn test_table_alignment_utf8() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let line = "|:---|---:|:---:|";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should use UTF-8 horizontal lines for separators
+        assert!(output.contains('─'));
+        assert!(output.contains(':'));
+    }
+
+    #[test]
+    fn test_unordered_list_utf8() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let test_cases = vec![
+            "- Item 1",
+            "* Item 2",
+            "+ Item 3",
+        ];
+
+        for line in test_cases {
+            let spans = style_markdown_line(line, &theme, &config.render, None);
+            let output = get_text_from_spans(&spans);
+
+            // Should use UTF-8 bullet point
+            assert!(output.contains('•'), "Failed for line: {}", line);
+            assert!(!output.starts_with('-') && !output.starts_with('*') && !output.starts_with('+'),
+                    "Should not start with ASCII markers for: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_unordered_list_ascii() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = false;
+
+        let line = "- Item 1";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Should remain as ASCII
+        assert!(output.starts_with("- "));
+        assert!(!output.contains('•'));
+    }
+
+    #[test]
+    fn test_ordered_list_unchanged() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let line = "1. First item";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // Ordered lists should keep their numbers
+        assert!(output.starts_with("1. "));
+        assert!(!output.contains('•'));
+    }
+
+    #[test]
+    fn test_default_config_uses_utf8() {
+        let config = Config::default();
+        // Default should enable UTF-8 graphics
+        assert!(config.render.use_utf8_graphics);
+    }
+
+    #[test]
+    fn test_utf8_preserves_styling() {
+        let theme = Theme::dark();
+        let mut config = Config::default();
+        config.render.use_utf8_graphics = true;
+
+        let line = "| Header 1 | Header 2 |";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+
+        // Verify we have multiple spans (content + separators)
+        assert!(spans.len() > 1);
+
+        // Find the separator span
+        let separator_span = spans.iter().find(|s| s.content.as_ref() == "│").unwrap();
+
+        // Verify separator has cyan color
+        assert_eq!(separator_span.style.fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_default_config_has_utf8_enabled() {
+        let config = Config::default();
+
+        let theme = Theme::dark();
+        let line = "| Col1 | Col2 |";
+        let spans = style_markdown_line(line, &theme, &config.render, None);
+        let output = get_text_from_spans(&spans);
+
+        // With default config (UTF-8 enabled), should have UTF-8 chars
+        assert!(output.contains('│'), "Expected UTF-8 vertical bar '│' in output: {}", output);
     }
 }

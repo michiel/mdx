@@ -8,11 +8,26 @@ use crate::security::SecurityEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct RenderConfig {
+    pub use_utf8_graphics: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            use_utf8_graphics: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub theme: ThemeVariant,
     pub toc: TocConfig,
     pub editor: EditorConfig,
     pub security: SecurityConfig,
+    pub render: RenderConfig,
     #[cfg(feature = "watch")]
     pub watch: WatchConfig,
     #[cfg(feature = "git")]
@@ -91,6 +106,7 @@ impl Default for Config {
             toc: TocConfig::default(),
             editor: EditorConfig::default(),
             security: SecurityConfig::default(),
+            render: RenderConfig::default(),
             #[cfg(feature = "watch")]
             watch: WatchConfig::default(),
             #[cfg(feature = "git")]
@@ -193,23 +209,35 @@ impl Config {
                 let content = std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-                let mut config: Config = toml::from_str(&content)
+                let config: Config = toml::from_str(&content)
                     .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
 
-                if config.security.safe_mode {
-                    config.images.enabled = false;
+                #[cfg(feature = "images")]
+                {
+                    let mut config = config;
+                    if config.security.safe_mode {
+                        config.images.enabled = false;
+                    }
+                    return Ok((config, warnings));
                 }
 
+                #[cfg(not(feature = "images"))]
                 return Ok((config, warnings));
             }
         }
 
         // No config file, use defaults
-        let mut config = Self::default();
-        if config.security.safe_mode {
-            config.images.enabled = false;
+        let config = Self::default();
+        #[cfg(feature = "images")]
+        {
+            let mut config = config;
+            if config.security.safe_mode {
+                config.images.enabled = false;
+            }
+            return Ok((config, warnings));
         }
 
+        #[cfg(not(feature = "images"))]
         Ok((config, warnings))
     }
 
@@ -232,14 +260,20 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        let mut config: Config = toml::from_str(&content)
+        let config: Config = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))
             ?;
 
-        if config.security.safe_mode {
-            config.images.enabled = false;
+        #[cfg(feature = "images")]
+        {
+            let mut config = config;
+            if config.security.safe_mode {
+                config.images.enabled = false;
+            }
+            return Ok(config);
         }
 
+        #[cfg(not(feature = "images"))]
         Ok(config)
     }
 

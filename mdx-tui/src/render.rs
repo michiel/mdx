@@ -9,6 +9,7 @@ pub struct RenderKey {
     pub doc_rev: u64,
     pub width: u16,
     pub theme: ThemeVariant,
+    pub use_utf8_graphics: bool,
 }
 
 /// Rendered document output
