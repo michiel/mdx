@@ -7,12 +7,26 @@ use ropey::Rope;
 pub fn extract_headings(rope: &Rope) -> Vec<Heading> {
     let mut headings = Vec::new();
     let line_count = rope.len_lines();
+    let mut in_code_block = false;
 
     let mut line_idx = 0;
     while line_idx < line_count {
         let line = rope.line(line_idx);
         let line_str: String = line.chunks().collect();
         let trimmed = line_str.trim_end();
+        let trimmed_start = trimmed.trim_start();
+
+        // Track fenced code blocks (``` or ~~~), ignoring headings inside.
+        if trimmed_start.starts_with("```") || trimmed_start.starts_with("~~~") {
+            in_code_block = !in_code_block;
+            line_idx += 1;
+            continue;
+        }
+
+        if in_code_block {
+            line_idx += 1;
+            continue;
+        }
 
         // Check for ATX headings: ^#{1,6}\s+
         if let Some(level) = parse_atx_heading(trimmed) {
@@ -210,5 +224,23 @@ mod tests {
         let headings = extract_headings(&rope);
 
         assert_eq!(headings.len(), 0);
+    }
+
+    #[test]
+    fn test_headings_ignored_in_fenced_code_blocks() {
+        let text = "\
+```
+# Not a heading
+```
+# Heading
+```rust
+## Also not a heading
+```
+";
+        let rope = Rope::from(text);
+        let headings = extract_headings(&rope);
+
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].text, "Heading");
     }
 }
