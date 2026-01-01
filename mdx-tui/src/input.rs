@@ -1275,8 +1275,35 @@ fn handle_mouse_down(
                 }
             }
         }
-        HitTarget::Toc(_rect) => {
-            // Stage 3: TOC click handling
+        HitTarget::Toc(rect) => {
+            // TOC click: navigate to heading but keep focus on TOC
+            let was_focused = app.toc_focus;
+            app.toc_focus = true; // Focus TOC first
+
+            // Compute clicked row
+            // Account for: top border (1)
+            let content_y_offset = 1;
+            let y_in_toc = y.saturating_sub(rect.y);
+
+            if y_in_toc >= content_y_offset && y_in_toc < rect.y + rect.height.saturating_sub(1) {
+                let row_offset = (y_in_toc - content_y_offset) as usize;
+                let clicked_row = app.toc_scroll + row_offset;
+
+                // Update toc_selected if valid
+                if clicked_row < app.doc.headings.len() {
+                    app.toc_selected = clicked_row;
+                    // Jump to the selected heading in the focused pane
+                    app.toc_jump_to_selected();
+                    // Restore TOC focus (toc_jump_to_selected doesn't change focus, but we ensure it)
+                    app.toc_focus = true;
+                }
+            }
+
+            // If TOC wasn't focused before, keep previous focus state
+            if !was_focused {
+                app.toc_focus = false;
+            }
+
             app.mouse_state = MouseState::Idle;
         }
         HitTarget::SplitBorder { path, .. } => {
@@ -1382,21 +1409,45 @@ fn handle_scroll(
 
     match target {
         HitTarget::Toc(rect) => {
-            // Stage 3: Scroll TOC
-            let _visible_rows = rect.height.saturating_sub(2) as usize; // -2 for borders
-            // TODO: Adjust toc_scroll
+            // Scroll TOC list
+            let visible_rows = rect.height.saturating_sub(2) as usize; // -2 for borders
+            let max_scroll = app.doc.headings.len().saturating_sub(visible_rows);
+
+            // Apply scroll delta
+            if delta > 0 {
+                // Scroll down
+                app.toc_scroll = (app.toc_scroll + delta as usize).min(max_scroll);
+            } else {
+                // Scroll up
+                app.toc_scroll = app.toc_scroll.saturating_sub((-delta) as usize);
+            }
+
+            // Don't change toc_selected or focus
         }
         HitTarget::Pane(pane_id, rect) => {
-            // Stage 3: Scroll pane
-            let _visible_lines = rect.height.saturating_sub(3) as usize; // -3 for borders + breadcrumb
-            // TODO: Adjust pane's scroll_line
-            let _ = pane_id; // Suppress unused warning for now
+            // Scroll pane content without moving cursor
+            let visible_lines = rect.height.saturating_sub(3) as usize; // -3 for borders + breadcrumb
+            let doc_lines = app.doc.rope.len_lines();
+            let max_scroll = doc_lines.saturating_sub(visible_lines);
+
+            if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                // Apply scroll delta
+                if delta > 0 {
+                    // Scroll down
+                    pane.view.scroll_line = (pane.view.scroll_line + delta as usize).min(max_scroll);
+                } else {
+                    // Scroll up
+                    pane.view.scroll_line = pane.view.scroll_line.saturating_sub((-delta) as usize);
+                }
+
+                // Don't move cursor - this is different from keyboard scrolling
+                // Cursor stays at its current line, which may scroll out of view
+            }
         }
         _ => {
             // Ignore scroll on other areas
         }
     }
 
-    let _ = delta; // Suppress unused warning for now
     Ok(())
 }
