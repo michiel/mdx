@@ -49,10 +49,19 @@ echo "Downloading $ASSET..."
 
 # Get latest release URL
 LATEST_URL="https://api.github.com/repos/michiel/mdx/releases/latest"
-DOWNLOAD_URL=$(curl -fsSL "$LATEST_URL" | grep "browser_download_url.*$ASSET" | cut -d '"' -f 4)
+RELEASE_JSON=$(curl -fsSL "$LATEST_URL" || true)
+DOWNLOAD_URL=$(printf "%s" "$RELEASE_JSON" | grep "browser_download_url.*$ASSET" | cut -d '"' -f 4)
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    echo "Error: Could not find download URL for $ASSET"
+    if printf "%s" "$RELEASE_JSON" | grep -q "API rate limit exceeded"; then
+        echo "Error: GitHub API rate limit exceeded. Try again later or use a GitHub token:"
+        echo "  export GITHUB_TOKEN=...   # then re-run the installer"
+    elif printf "%s" "$RELEASE_JSON" | grep -q "\"message\""; then
+        echo "Error: GitHub API response error:"
+        printf "%s\n" "$RELEASE_JSON" | sed -n '1,5p'
+    else
+        echo "Error: Could not find download URL for $ASSET"
+    fi
     exit 1
 fi
 
