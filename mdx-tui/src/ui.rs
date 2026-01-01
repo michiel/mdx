@@ -1,6 +1,7 @@
 //! UI rendering
 
 use crate::app::App;
+use crate::collapse::{self, CollapseRange};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
@@ -104,6 +105,91 @@ fn sanitize_for_terminal(input: &str) -> String {
             c == '\n' || c == '\t' || (c >= ' ' && c != '\x7f' && (c < '\u{80}' || c > '\u{9f}'))
         })
         .collect()
+}
+
+/// Render a collapsed block summary line
+///
+/// Returns a styled Line showing the collapse indicator, heading text, and line count
+fn render_collapsed_summary(
+    range: &CollapseRange,
+    line_num_width: usize,
+    theme: &crate::theme::Theme,
+    is_focused: bool,
+    is_cursor: bool,
+    content_width: usize,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+
+    // Add line number
+    let line_num = format!("{:>width$} ", range.start + 1, width = line_num_width);
+    let line_num_color = if is_focused && is_cursor {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
+    spans.push(Span::styled(line_num, Style::default().fg(line_num_color)));
+
+    // Add gutter spacing (2 chars for diff gutter)
+    spans.push(Span::raw("  "));
+
+    // Add collapse indicator (▶)
+    spans.push(Span::styled(
+        "▶ ",
+        Style::default().fg(theme.collapsed_indicator_fg)
+    ));
+
+    // Add heading marks based on level
+    if let Some(level) = range.level {
+        let marks = "#".repeat(level as usize);
+        let heading_style = theme.heading.get(level as usize - 1)
+            .copied()
+            .unwrap_or(theme.base);
+        spans.push(Span::styled(format!("{} ", marks), heading_style));
+    }
+
+    // Add heading text (truncated)
+    let heading_style = if let Some(level) = range.level {
+        theme.heading.get(level as usize - 1)
+            .copied()
+            .unwrap_or(theme.base)
+    } else {
+        theme.base
+    };
+    spans.push(Span::styled(range.text.clone(), heading_style));
+
+    // Add line count
+    let count_text = format!(" ({} lines)", range.line_count);
+    spans.push(Span::styled(
+        count_text,
+        Style::default().fg(Color::DarkGray)
+    ));
+
+    // Calculate current width and pad to content width
+    let current_width: usize = spans.iter()
+        .map(|s| s.content.chars().count())
+        .sum();
+
+    if current_width < content_width {
+        let padding = " ".repeat(content_width - current_width);
+        spans.push(Span::styled(
+            padding,
+            Style::default().bg(theme.collapsed_block_bg)
+        ));
+    }
+
+    // Apply background color to all spans
+    let spans: Vec<Span> = spans.into_iter()
+        .map(|mut span| {
+            if is_focused && is_cursor {
+                span.style = span.style.bg(theme.cursor_line_bg);
+            } else {
+                span.style = span.style.bg(theme.collapsed_block_bg);
+            }
+            span
+        })
+        .collect();
+
+    Line::from(spans)
 }
 
 /// Render security warnings pane
@@ -228,6 +314,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let gutter_width = 2; // Git gutter or spacing
     let left_margin_width = (line_num_width + 1 + gutter_width) as u16; // +1 for space after line number
 
+    // Compute collapsed ranges for this pane
+    let collapsed_ranges = collapse::compute_all_collapsed_ranges(&pane.view.collapsed_headings, &app.doc);
+
     // Build only visible lines
     let mut styled_lines: Vec<Line> = Vec::new();
     let mut is_table_row_flags: Vec<bool> = Vec::new();
@@ -239,6 +328,39 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
     let mut line_idx = scroll;
     while line_idx < visible_end {
+        // Check if this line is the start of a collapsed range
+        if let Some(range) = collapse::find_range_at_line(&collapsed_ranges, line_idx) {
+            // Render collapsed summary
+            let content_width = content_area.width.saturating_sub(2) as usize;
+            let is_cursor = is_focused && cursor == line_idx;
+            let summary_line = render_collapsed_summary(
+                range,
+                line_num_width,
+                &app.theme,
+                is_focused,
+                is_cursor,
+                content_width,
+            );
+
+            styled_lines.push(summary_line);
+            is_table_row_flags.push(false);
+            list_item_indents.push(None);
+
+            // Skip to the end of the collapsed range
+            line_idx = range.end + 1;
+            continue;
+        }
+
+        // Check if this line is inside a collapsed range (but not the start)
+        if collapse::find_range_containing_line(&collapsed_ranges, line_idx).is_some() {
+            // Skip this line - it's hidden inside a collapsed block
+            line_idx += 1;
+            // Expand visible_end to compensate for skipped line
+            if visible_end < line_count {
+                visible_end += 1;
+            }
+            continue;
+        }
         let mut line_spans: Vec<Span> = Vec::new();
 
         // Get line text first to check if it's a fence
@@ -461,17 +583,33 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             false
         };
 
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting - priority order: selection > cursor > code block
+        // Apply highlighting directly to spans - priority order: selection > cursor > code block
         if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+            // Visual line selection: apply cyan background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_focused && line_idx == cursor {
-            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+            // Cursor line: apply cursor background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_code_block_line {
-            // Apply code block background to entire line
-            line = line.style(Style::default().bg(app.theme.code_block_bg));
+            // Code block: apply code block background to each span (if not already styled)
+            line_spans = line_spans.into_iter().map(|mut span| {
+                if span.style.bg.is_none() {
+                    let new_style = span.style.bg(app.theme.code_block_bg);
+                    span.style = new_style;
+                }
+                span
+            }).collect();
         }
+
+        let line = Line::from(line_spans);
 
         // Detect if this is a list item and calculate continuation indent
         let list_indent = if !in_code_block {
@@ -854,15 +992,24 @@ fn render_raw_text(
             false
         };
 
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting - priority order: selection > cursor
+        // Apply highlighting directly to spans - priority order: selection > cursor
         if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+            // Visual line selection: apply cyan background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_focused && line_idx == cursor {
-            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+            // Cursor line: apply cursor background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            }).collect();
         }
 
+        let line = Line::from(line_spans);
         lines.push(line);
     }
 
@@ -1394,20 +1541,30 @@ fn render_table_block(
                 line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
             }
 
-            let mut line = Line::from(line_spans);
-
             let is_selected = if let Some((start, end)) = selection_range {
                 *source_idx >= start && *source_idx <= end
             } else {
                 false
             };
 
+            // Apply highlighting directly to spans - priority order: selection > cursor
             if is_focused && is_selected {
-                line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+                // Visual line selection: apply cyan background to each span
+                line_spans = line_spans.into_iter().map(|mut span| {
+                    let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                    span.style = new_style;
+                    span
+                }).collect();
             } else if is_focused && *source_idx == cursor {
-                line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+                // Cursor line: apply cursor background to each span
+                line_spans = line_spans.into_iter().map(|mut span| {
+                    let new_style = span.style.bg(app.theme.cursor_line_bg);
+                    span.style = new_style;
+                    span
+                }).collect();
             }
 
+            let line = Line::from(line_spans);
             rendered.push(line);
         }
     }
@@ -1829,6 +1986,28 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let prefix_str = match app.key_prefix {
         crate::app::KeyPrefix::None => "",
         crate::app::KeyPrefix::CtrlW => "  ^W-",
+        crate::app::KeyPrefix::Z => "  z-",
+    };
+
+    let fold_indicator = if app.is_cursor_under_collapsed_heading() {
+        "  [COLLAPSED]"
+    } else if app.is_cursor_on_heading() {
+        "  [FOLDABLE]"
+    } else {
+        // Check if cursor is anywhere under a foldable section
+        if let Some(pane) = app.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+            // Find nearest heading above
+            let has_heading_above = app.doc.headings.iter()
+                .any(|h| h.line <= cursor_line);
+            if has_heading_above {
+                "  [IN SECTION]"
+            } else {
+                ""
+            }
+        } else {
+            ""
+        }
     };
 
     let selection_str = if let Some(count) = selection_count {
@@ -1890,8 +2069,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
     // Normal status bar
     let status_text = format!(
-        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str, search_str
+        " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}{}{}",
+        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str, search_str, fold_indicator
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(
@@ -1911,7 +2090,7 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
     // Create a centered popup area
     let area = frame.area();
     let popup_width = 70.min(area.width.saturating_sub(4));
-    let popup_height = 33.min(area.height.saturating_sub(4));
+    let popup_height = 52.min(area.height.saturating_sub(4));
 
     let popup_area = ratatui::layout::Rect {
         x: (area.width.saturating_sub(popup_width)) / 2,
@@ -1955,6 +2134,18 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  Esc               Exit visual mode"),
         Line::from(""),
         Line::from(vec![
+            Span::styled("Folding", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  ←                 Collapse current section"),
+        Line::from("  →                 Expand current section"),
+        Line::from("  za                Toggle fold of current section"),
+        Line::from("  zo                Open fold of current section"),
+        Line::from("  zc                Close fold of current section"),
+        Line::from("  zM                Close all folds"),
+        Line::from("  zR                Open all folds"),
+        Line::from("  Note: Works on heading or anywhere in section"),
+        Line::from(""),
+        Line::from(vec![
             Span::styled("Panes", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
         Line::from("  Ctrl+w s          Split horizontally"),
@@ -1964,11 +2155,21 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  q                 Close pane (quit if last)"),
         Line::from(""),
         Line::from(vec![
+            Span::styled("Mouse", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  Click pane        Focus pane and move cursor"),
+        Line::from("  Click+drag        Select text (line-based)"),
+        Line::from("  Ctrl+Shift+C      Copy selection to clipboard"),
+        Line::from("  Click TOC         Jump to heading"),
+        Line::from("  Scroll wheel      Scroll pane or TOC"),
+        Line::from("  Drag border       Resize split panes"),
+        Line::from(""),
+        Line::from(vec![
             Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
         Line::from("  t                 Toggle TOC sidebar"),
         Line::from("  T                 Open TOC dialog (full screen)"),
-        Line::from("  M                 Toggle theme (dark/light)"),
+        Line::from("  m                 Toggle theme (dark/light)"),
         Line::from("  O                 Open options dialog"),
         Line::from("  W                 Toggle security warnings pane"),
         Line::from("  e                 Open in $EDITOR"),
@@ -2351,15 +2552,24 @@ fn render_image_info_placeholder(
             .add_modifier(Modifier::BOLD)
     ));
 
-    let mut line = Line::from(line_spans);
-
-    // Apply highlighting if this is the cursor or selected line
+    // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
-        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        // Visual line selection: apply cyan background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+            span.style = new_style;
+            span
+        }).collect();
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        // Cursor line: apply cursor background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(app.theme.cursor_line_bg);
+            span.style = new_style;
+            span
+        }).collect();
     }
 
+    let line = Line::from(line_spans);
     lines.push(line);
 
     (lines, 1)
@@ -2440,15 +2650,24 @@ fn render_image_placeholder(
             .add_modifier(Modifier::BOLD)
     ));
 
-    let mut line = Line::from(line_spans);
-
-    // Apply highlighting if this is the cursor or selected line
+    // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
-        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        // Visual line selection: apply cyan background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+            span.style = new_style;
+            span
+        }).collect();
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        // Cursor line: apply cursor background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(app.theme.cursor_line_bg);
+            span.style = new_style;
+            span
+        }).collect();
     }
 
+    let line = Line::from(line_spans);
     lines.push(line);
 
     (lines, 1)

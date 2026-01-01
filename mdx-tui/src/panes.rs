@@ -64,6 +64,18 @@ use std::collections::HashMap;
 /// Unique identifier for a pane
 pub type PaneId = usize;
 
+/// Information about a split boundary for mouse interaction
+#[derive(Debug, Clone)]
+pub struct SplitBoundary {
+    pub path: Vec<usize>,    // Path to the split node (0=left/top, 1=right/bottom at each level)
+    pub dir: SplitDir,        // Direction of this split
+    pub position: u16,        // X coordinate for vertical split, Y for horizontal
+    pub start: u16,           // Starting coordinate (Y for vertical, X for horizontal)
+    pub end: u16,             // Ending coordinate (Y for vertical, X for horizontal)
+    pub current_ratio: f32,   // Current ratio of this split
+    pub area: Rect,           // Area covered by this split
+}
+
 /// Direction of a split
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDir {
@@ -219,6 +231,13 @@ impl PaneManager {
         rects
     }
 
+    /// Compute all split boundaries for mouse interaction
+    pub fn compute_split_boundaries(&self, area: Rect) -> Vec<SplitBoundary> {
+        let mut boundaries = Vec::new();
+        self.compute_split_boundaries_recursive(&self.root, area, &mut vec![], &mut boundaries);
+        boundaries
+    }
+
     fn compute_layout_recursive(
         &self,
         node: &PaneNode,
@@ -276,6 +295,115 @@ impl PaneManager {
                 self.compute_layout_recursive(left, left_rect, rects);
                 self.compute_layout_recursive(right, right_rect, rects);
             }
+        }
+    }
+
+    fn compute_split_boundaries_recursive(
+        &self,
+        node: &PaneNode,
+        area: Rect,
+        path: &mut Vec<usize>,
+        boundaries: &mut Vec<SplitBoundary>,
+    ) {
+        match node {
+            PaneNode::Leaf(_) => {
+                // No boundaries in a leaf
+            }
+            PaneNode::Split { dir, left, right, ratio } => {
+                // Record this split boundary
+                let (position, start, end) = match dir {
+                    SplitDir::Horizontal => {
+                        // Horizontal split: boundary is a horizontal line at split_y
+                        let split_y = area.y + (area.height as f32 * ratio) as u16;
+                        (split_y, area.x, area.x + area.width)
+                    }
+                    SplitDir::Vertical => {
+                        // Vertical split: boundary is a vertical line at split_x
+                        let split_x = area.x + (area.width as f32 * ratio) as u16;
+                        (split_x, area.y, area.y + area.height)
+                    }
+                };
+
+                boundaries.push(SplitBoundary {
+                    path: path.clone(),
+                    dir: *dir,
+                    position,
+                    start,
+                    end,
+                    current_ratio: *ratio,
+                    area,
+                });
+
+                // Recurse into children
+                let (left_rect, right_rect) = match dir {
+                    SplitDir::Horizontal => {
+                        let split_y = area.y + (area.height as f32 * ratio) as u16;
+                        let top_height = split_y.saturating_sub(area.y);
+                        let bottom_height = area.height.saturating_sub(top_height);
+                        (
+                            Rect { x: area.x, y: area.y, width: area.width, height: top_height },
+                            Rect { x: area.x, y: split_y, width: area.width, height: bottom_height },
+                        )
+                    }
+                    SplitDir::Vertical => {
+                        let split_x = area.x + (area.width as f32 * ratio) as u16;
+                        let left_width = split_x.saturating_sub(area.x);
+                        let right_width = area.width.saturating_sub(left_width);
+                        (
+                            Rect { x: area.x, y: area.y, width: left_width, height: area.height },
+                            Rect { x: split_x, y: area.y, width: right_width, height: area.height },
+                        )
+                    }
+                };
+
+                path.push(0);
+                self.compute_split_boundaries_recursive(left, left_rect, path, boundaries);
+                path.pop();
+
+                path.push(1);
+                self.compute_split_boundaries_recursive(right, right_rect, path, boundaries);
+                path.pop();
+            }
+        }
+    }
+
+    /// Update split ratio by path
+    /// Returns true if the path was valid and ratio was updated
+    pub fn update_split_ratio(&mut self, path: &[usize], new_ratio: f32) -> bool {
+        // Clamp ratio to reasonable bounds (10% to 90%)
+        let clamped_ratio = new_ratio.max(0.1).min(0.9);
+        Self::update_split_ratio_recursive(&mut self.root, path, clamped_ratio)
+    }
+
+    fn update_split_ratio_recursive(
+        node: &mut PaneNode,
+        path: &[usize],
+        new_ratio: f32,
+    ) -> bool {
+        if path.is_empty() {
+            // We've reached the target split
+            if let PaneNode::Split { ratio, .. } = node {
+                *ratio = new_ratio;
+                return true;
+            }
+            return false;
+        }
+
+        // Recurse to the next level
+        match node {
+            PaneNode::Split { left, right, .. } => {
+                let child_index = path[0];
+                let remaining_path = &path[1..];
+
+                if child_index == 0 {
+                    Self::update_split_ratio_recursive(left, remaining_path, new_ratio)
+                } else if child_index == 1 {
+                    Self::update_split_ratio_recursive(right, remaining_path, new_ratio)
+                } else {
+                    false
+                }
+            }
+            PaneNode::Leaf(_) => false,
         }
     }
 

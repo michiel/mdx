@@ -15,6 +15,7 @@ A fast, terminal-based Markdown viewer and editor launcher built in Rust. Design
 ### Navigation and Editing
 
   - **Vim-style navigation** - Familiar keybindings (`hjkl`, `gg`, `G`, `Ctrl-u`, `Ctrl-d`, `/`, `n`, `N`)
+  - **Collapsible sections** - Fold/unfold headings to focus on relevant content with vim-style (`za`, `zo`, `zc`, `zM`, `zR`) or arrow keys
   - **Table of contents** - Sidebar with document outline and quick heading navigation
   - **Visual line mode** - Select and yank multiple lines to clipboard
   - **Search** - Forward search with next/previous match navigation
@@ -106,10 +107,12 @@ mdx docs/guide.md
 
 - Press `j`/`k` to scroll line by line
 - Press `Ctrl-d`/`Ctrl-u` for half-page scrolling
+- Press `←`/`→` to collapse/expand sections
 - Press `T` to toggle the table of contents sidebar
 - Press `/` to search, then `n`/`N` to navigate matches
 - Press `e` to open the file in your external editor
-- Press `M` to toggle between dark and light themes
+- Press `m` to toggle between dark and light themes
+- Press `?` to see all keybindings
 - Press `q` to quit
 
 The application uses `$EDITOR` by default for external editing. Configure a custom editor in `mdx.yaml`.
@@ -135,6 +138,20 @@ The application uses `$EDITOR` by default for external editing. Configure a cust
 | `Enter` | Jump to selected heading |
 | `q` | Close TOC sidebar |
 
+### Collapsible Sections
+
+| Key | Action |
+|-----|--------|
+| `←` | Collapse current section |
+| `→` | Expand current section |
+| `za` | Toggle fold of current section |
+| `zo` | Open fold of current section |
+| `zc` | Close fold of current section |
+| `zM` | Close all folds |
+| `zR` | Open all folds |
+
+**Note**: Folding commands work on the heading at cursor or the nearest heading above, allowing you to collapse a section from anywhere within it. TOC navigation automatically expands collapsed sections when jumping to them.
+
 ### Split Panes
 
 | Key | Action |
@@ -156,10 +173,14 @@ The application uses `$EDITOR` by default for external editing. Configure a cust
 
 | Key | Action |
 |-----|--------|
-| `M` | Toggle between dark and light themes |
+| `?` | Show help dialog with all keybindings |
+| `m` | Toggle between dark and light themes |
+| `O` | Open options dialog |
 | `e` | Open file in external editor |
-| `r` | Reload file from disk (when auto-reload is disabled) |
+| `r` | Toggle raw/rendered mode |
+| `R` | Reload file from disk |
 | `q` | Quit application |
+| `Ctrl-C` | Force quit |
 
 ## Configuration
 
@@ -269,14 +290,6 @@ Contributions are welcome. Please ensure:
 - Code is formatted (`cargo fmt`)
 - Clippy is happy (`cargo clippy`)
 - Commit messages are clear and descriptive
-
-## Roadmap
-
-- Improved source-to-render line mapping for more accurate selection and diff gutters
-- Enhanced Markdown rendering with additional CommonMark features
-- Customisable keybindings via configuration file
-- Support for following Markdown links
-- Document bookmarks and history
 
 ## Licence
 

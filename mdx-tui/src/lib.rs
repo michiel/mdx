@@ -8,6 +8,7 @@
 //! - Theme system
 
 pub mod app;
+pub mod collapse;
 pub mod editor;
 pub mod event;
 pub mod input;
@@ -69,35 +70,44 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
 
         // Poll for events with timeout
         if crossterm::event::poll(Duration::from_millis(100)).context("Failed to poll events")? {
-            if let Event::Key(key) = crossterm::event::read().context("Failed to read event")? {
-                // Only handle key press events, ignore release
-                if key.kind == KeyEventKind::Press {
-                    let action = input::handle_input(app, key, viewport_height, viewport_width)?;
+            let event = crossterm::event::read().context("Failed to read event")?;
+            match event {
+                Event::Key(key) => {
+                    // Only handle key press events, ignore release
+                    if key.kind == KeyEventKind::Press {
+                        let action = input::handle_input(app, key, viewport_height, viewport_width)?;
 
-                    // Handle special actions
-                    match action {
-                        input::Action::OpenEditor => {
-                            // Suspend terminal
-                            terminal::restore().context("Failed to restore terminal for editor")?;
+                        // Handle special actions
+                        match action {
+                            input::Action::OpenEditor => {
+                                // Suspend terminal
+                                terminal::restore().context("Failed to restore terminal for editor")?;
 
-                            // Launch editor
-                            let editor_result = app.open_in_editor();
+                                // Launch editor
+                                let editor_result = app.open_in_editor();
 
-                            // Restore terminal
-                            *terminal = terminal::init().context("Failed to reinitialize terminal after editor")?;
+                                // Restore terminal
+                                *terminal = terminal::init().context("Failed to reinitialize terminal after editor")?;
 
-                            // Handle editor errors (after terminal is restored)
-                            if let Err(e) = editor_result {
-                                app.set_error_message(format!("Editor error: {}", e));
+                                // Handle editor errors (after terminal is restored)
+                                if let Err(e) = editor_result {
+                                    app.set_error_message(format!("Editor error: {}", e));
+                                }
+                            }
+                            input::Action::Quit => {
+                                // Quit already handled by should_quit flag
+                            }
+                            input::Action::Continue => {
+                                // Nothing to do
                             }
                         }
-                        input::Action::Quit => {
-                            // Quit already handled by should_quit flag
-                        }
-                        input::Action::Continue => {
-                            // Nothing to do
-                        }
                     }
+                }
+                Event::Mouse(mouse_event) => {
+                    input::handle_mouse(app, mouse_event, viewport_height, viewport_width)?;
+                }
+                _ => {
+                    // Ignore other events (resize, focus, etc.)
                 }
             }
         }

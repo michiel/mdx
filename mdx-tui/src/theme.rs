@@ -19,6 +19,8 @@ pub struct Theme {
     pub cursor_line_bg: Color,
     pub status_bar_fg: Color,
     pub status_bar_bg: Color,
+    pub collapsed_block_bg: Color,
+    pub collapsed_indicator_fg: Color,
     #[cfg(feature = "git")]
     pub diff_add: Style,
     #[cfg(feature = "git")]
@@ -84,6 +86,8 @@ impl Theme {
             cursor_line_bg: Color::Rgb(45, 48, 55), // Visible but subtle
             status_bar_fg: Color::Rgb(220, 220, 220),
             status_bar_bg: Color::Rgb(52, 61, 70), // Muted blue-gray
+            collapsed_block_bg: Color::Rgb(35, 38, 45), // Slightly darker than normal bg
+            collapsed_indicator_fg: Color::Rgb(86, 182, 194), // Cyan, matches TOC active
             #[cfg(feature = "git")]
             diff_add: Style::default().fg(Color::Rgb(152, 195, 121)), // Softer green
             #[cfg(feature = "git")]
@@ -141,6 +145,8 @@ impl Theme {
             cursor_line_bg: Color::Rgb(240, 246, 252), // Light blue tint
             status_bar_fg: Color::Rgb(255, 255, 255),
             status_bar_bg: Color::Rgb(36, 41, 46), // Dark background for contrast
+            collapsed_block_bg: Color::Rgb(235, 240, 245), // Slightly darker than normal bg
+            collapsed_indicator_fg: Color::Rgb(0, 128, 128), // Teal, matches H2
             #[cfg(feature = "git")]
             diff_add: Style::default().fg(Color::Rgb(34, 134, 58)), // Forest green
             #[cfg(feature = "git")]

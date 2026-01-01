@@ -1,7 +1,7 @@
 //! Application state
 
 use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
-use crate::panes::PaneManager;
+use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
 
 /// Application mode
@@ -12,11 +12,31 @@ pub enum Mode {
     Search,
 }
 
+/// Mouse interaction state
+#[derive(Debug, Clone, PartialEq)]
+pub enum MouseState {
+    Idle,
+    PendingSelection {
+        pane_id: PaneId,
+        anchor_line: usize,
+    },
+    Selecting {
+        pane_id: PaneId,
+        anchor_line: usize,
+    },
+    Resizing {
+        split_path: Vec<usize>, // Path to the split being resized
+        start_ratio: f32,
+        start_pos: (u16, u16), // Starting mouse position
+    },
+}
+
 /// Key prefix state for multi-key sequences
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyPrefix {
     None,
     CtrlW,
+    Z, // For fold commands (za, zo, zc, zM, zR)
 }
 
 /// View state for a document viewport
@@ -27,6 +47,7 @@ pub struct ViewState {
     pub mode: Mode,
     pub selection: Option<LineSelection>,
     pub show_raw: bool, // Toggle between rendered markdown and raw text
+    pub collapsed_headings: std::collections::BTreeSet<usize>, // Line numbers of collapsed headings
 }
 
 impl ViewState {
@@ -38,6 +59,7 @@ impl ViewState {
             mode: Mode::Normal,
             selection: None,
             show_raw: false,
+            collapsed_headings: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -74,6 +96,7 @@ pub struct App {
     pub security_warnings: Vec<mdx_core::SecurityEvent>,
     pub show_security_warnings: bool,
     pub status_message: Option<(String, StatusMessageKind)>,
+    pub mouse_state: MouseState,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -141,6 +164,7 @@ impl App {
             security_warnings: warnings,
             show_security_warnings,
             status_message: None,
+            mouse_state: MouseState::Idle,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
@@ -260,28 +284,79 @@ impl App {
         Ok(())
     }
 
-    /// Move cursor down by n lines
+    /// Move cursor down by n lines, skipping collapsed blocks
     pub fn move_cursor_down(&mut self, n: usize) {
         if let Some(pane) = self.panes.focused_pane_mut() {
             let max_line = self.doc.line_count().saturating_sub(1);
             pane.view.cursor_line = (pane.view.cursor_line + n).min(max_line);
         }
+        self.adjust_cursor_for_collapsed_blocks(true);
         self.update_selection();
     }
 
-    /// Move cursor up by n lines
+    /// Move cursor up by n lines, skipping collapsed blocks
     pub fn move_cursor_up(&mut self, n: usize) {
         if let Some(pane) = self.panes.focused_pane_mut() {
             pane.view.cursor_line = pane.view.cursor_line.saturating_sub(n);
         }
+        self.adjust_cursor_for_collapsed_blocks(false);
         self.update_selection();
     }
 
-    /// Jump to specific line
+    /// Adjust cursor position if it lands inside a collapsed block
+    /// moving_down: if true, cursor lands on the line after the collapsed block; if false, on the heading
+    fn adjust_cursor_for_collapsed_blocks(&mut self, moving_down: bool) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            let cursor = pane.view.cursor_line;
+
+            // Compute collapsed ranges
+            let collapsed_ranges = crate::collapse::compute_all_collapsed_ranges(
+                &pane.view.collapsed_headings,
+                &self.doc,
+            );
+
+            // Check if cursor is inside a collapsed range (but not at the start)
+            if let Some(range) = crate::collapse::find_range_containing_line(&collapsed_ranges, cursor) {
+                if moving_down {
+                    // When moving down, jump to the line after the collapsed block
+                    pane.view.cursor_line = (range.end + 1).min(self.doc.line_count().saturating_sub(1));
+                } else {
+                    // When moving up, jump to the heading line
+                    pane.view.cursor_line = range.start;
+                }
+            }
+        }
+    }
+
+    /// Jump to specific line, expanding collapsed blocks if necessary
     pub fn jump_to_line(&mut self, line: usize) {
         if let Some(pane) = self.panes.focused_pane_mut() {
             let max_line = self.doc.line_count().saturating_sub(1);
-            pane.view.cursor_line = line.min(max_line);
+            let target_line = line.min(max_line);
+
+            // Expand ALL collapsed blocks that contain the target line
+            // This handles nested collapsed headings (e.g., "## Parent" contains "### Child")
+            // We need multiple passes because removing one heading may reveal others
+            loop {
+                let collapsed_ranges = crate::collapse::compute_all_collapsed_ranges(
+                    &pane.view.collapsed_headings,
+                    &self.doc,
+                );
+
+                // Find any collapsed range containing the target
+                let containing_range = collapsed_ranges.iter()
+                    .find(|r| r.contains_line(target_line) || r.start == target_line);
+
+                if let Some(range) = containing_range {
+                    // Expand this collapsed heading
+                    pane.view.collapsed_headings.remove(&range.start);
+                } else {
+                    // No more collapsed ranges containing target
+                    break;
+                }
+            }
+
+            pane.view.cursor_line = target_line;
         }
         self.update_selection();
     }
@@ -428,11 +503,13 @@ impl App {
 
     /// Jump to the selected heading in TOC, making it the top line
     pub fn toc_jump_to_selected(&mut self) {
-        if let Some(pane) = self.panes.focused_pane_mut() {
-            if let Some(heading) = self.doc.headings.get(self.toc_selected) {
-                // Set cursor and scroll to make heading the top line
-                pane.view.cursor_line = heading.line;
-                pane.view.scroll_line = heading.line;
+        if let Some(heading) = self.doc.headings.get(self.toc_selected) {
+            let target_line = heading.line;
+            // Use jump_to_line to handle collapsed section expansion
+            self.jump_to_line(target_line);
+            // Set scroll to make heading the top line
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.scroll_line = target_line;
             }
         }
     }
@@ -478,11 +555,13 @@ impl App {
 
     /// Jump to the selected heading in TOC dialog and close dialog
     pub fn toc_dialog_jump_to_selected(&mut self) {
-        if let Some(pane) = self.panes.focused_pane_mut() {
-            if let Some(heading) = self.doc.headings.get(self.toc_dialog_selected) {
-                // Set cursor and scroll to make heading the top line
-                pane.view.cursor_line = heading.line;
-                pane.view.scroll_line = heading.line;
+        if let Some(heading) = self.doc.headings.get(self.toc_dialog_selected) {
+            let target_line = heading.line;
+            // Use jump_to_line to handle collapsed section expansion
+            self.jump_to_line(target_line);
+            // Set scroll to make heading the top line
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.scroll_line = target_line;
             }
         }
         // Close the dialog
@@ -779,6 +858,153 @@ impl App {
     pub fn search_backspace(&mut self) {
         self.search_query.pop();
         self.search(&self.search_query.clone());
+    }
+
+    // ===== Collapse/Fold Operations =====
+
+    /// Find the nearest heading at or above the cursor position
+    fn find_nearest_heading_above(&self, cursor_line: usize) -> Option<usize> {
+        // Find the last heading that is at or before the cursor line
+        self.doc.headings.iter()
+            .rev()
+            .find(|h| h.line <= cursor_line)
+            .map(|h| h.line)
+    }
+
+    /// Check if the cursor is on a heading line (collapsible)
+    pub fn is_cursor_on_heading(&self) -> bool {
+        if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+            crate::collapse::is_heading_line(cursor_line, &self.doc)
+        } else {
+            false
+        }
+    }
+
+    /// Check if the cursor is on a collapsed heading
+    pub fn is_cursor_on_collapsed_heading(&self) -> bool {
+        if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+            pane.view.collapsed_headings.contains(&cursor_line)
+        } else {
+            false
+        }
+    }
+
+    /// Check if cursor is under a collapsed heading
+    pub fn is_cursor_under_collapsed_heading(&self) -> bool {
+        if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+            if let Some(heading_line) = self.find_nearest_heading_above(cursor_line) {
+                pane.view.collapsed_headings.contains(&heading_line)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Toggle collapse at cursor (collapse if expanded, expand if collapsed)
+    /// Works on the heading at cursor, or the nearest heading above
+    pub fn toggle_collapse_at_cursor(&mut self) {
+        // Get cursor line and find target heading first
+        let target_heading = if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+
+            // Find target heading: either at cursor or nearest above
+            if crate::collapse::is_heading_line(cursor_line, &self.doc) {
+                Some(cursor_line)
+            } else {
+                self.find_nearest_heading_above(cursor_line)
+            }
+        } else {
+            None
+        };
+
+        // Now mutably borrow to update
+        if let Some(heading_line) = target_heading {
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                // Toggle: remove if present, add if absent
+                if pane.view.collapsed_headings.contains(&heading_line) {
+                    pane.view.collapsed_headings.remove(&heading_line);
+                } else {
+                    pane.view.collapsed_headings.insert(heading_line);
+                }
+            }
+        }
+    }
+
+    /// Expand (open) fold at cursor or nearest heading above
+    pub fn expand_at_cursor(&mut self) {
+        // Get cursor line and find target heading first
+        let target_heading = if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+
+            // Find target heading: either at cursor or nearest above
+            if crate::collapse::is_heading_line(cursor_line, &self.doc) {
+                Some(cursor_line)
+            } else {
+                self.find_nearest_heading_above(cursor_line)
+            }
+        } else {
+            None
+        };
+
+        // Now mutably borrow to update
+        if let Some(heading_line) = target_heading {
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.collapsed_headings.remove(&heading_line);
+            }
+        }
+    }
+
+    /// Collapse (close) fold at cursor or nearest heading above
+    pub fn collapse_at_cursor(&mut self) {
+        // Get cursor line and find target heading first
+        let target_heading = if let Some(pane) = self.panes.focused_pane() {
+            let cursor_line = pane.view.cursor_line;
+
+            // Find target heading: either at cursor or nearest above
+            if crate::collapse::is_heading_line(cursor_line, &self.doc) {
+                Some(cursor_line)
+            } else {
+                self.find_nearest_heading_above(cursor_line)
+            }
+        } else {
+            None
+        };
+
+        // Now mutably borrow to update
+        if let Some(heading_line) = target_heading {
+            if let Some(pane) = self.panes.focused_pane_mut() {
+                pane.view.collapsed_headings.insert(heading_line);
+            }
+        }
+    }
+
+    /// Collapse all headings at or above a certain level
+    pub fn collapse_all_headings(&mut self, max_level: Option<u8>) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            for heading in &self.doc.headings {
+                // If max_level is specified, only collapse headings at that level or higher
+                if let Some(max) = max_level {
+                    if heading.level <= max {
+                        pane.view.collapsed_headings.insert(heading.line);
+                    }
+                } else {
+                    // Collapse all headings
+                    pane.view.collapsed_headings.insert(heading.line);
+                }
+            }
+        }
+    }
+
+    /// Expand (open) all folds
+    pub fn expand_all_headings(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.collapsed_headings.clear();
+        }
     }
 }
 

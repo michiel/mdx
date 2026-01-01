@@ -1,9 +1,10 @@
 //! Input handling and keybindings
 
-use crate::app::{App, KeyPrefix};
-use crate::panes::{Direction, SplitDir};
+use crate::app::{App, KeyPrefix, MouseState};
+use crate::panes::{Direction, PaneId, SplitDir};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 /// Result of handling input
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,22 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     ) {
         app.quit();
         return Ok(Action::Quit);
+    }
+
+    // Handle Ctrl+Shift+C - copy selection to clipboard
+    if key.code == KeyCode::Char('C')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && key.modifiers.contains(KeyModifiers::SHIFT)
+    {
+        match app.yank_selection() {
+            Ok(num_lines) => {
+                app.set_success_message(format!("Copied {} line(s) to clipboard", num_lines));
+            }
+            Err(e) => {
+                app.set_error_message(format!("Copy failed: {}", e));
+            }
+        }
+        return Ok(Action::Continue);
     }
 
     // Handle help dialog - close with Esc or ?
@@ -861,19 +878,6 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
-    // M - toggle theme
-    if matches!(
-        key,
-        KeyEvent {
-            code: KeyCode::Char('M'),
-            modifiers: KeyModifiers::SHIFT,
-            ..
-        }
-    ) {
-        app.toggle_theme();
-        return Ok(Action::Continue);
-    }
-
     // ? - toggle help dialog
     if matches!(
         key,
@@ -926,7 +930,98 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
-    // R - reload document from disk
+    // Handle 'z' prefix for fold commands
+    if app.key_prefix == KeyPrefix::Z {
+        match key {
+            // za - toggle fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('a'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toggle_collapse_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zo - open fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('o'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.expand_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zc - close fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.collapse_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zM - close all folds
+            KeyEvent {
+                code: KeyCode::Char('M'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.collapse_all_headings(None);
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zR - open all folds
+            KeyEvent {
+                code: KeyCode::Char('R'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.expand_all_headings();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // Any other key cancels the prefix
+            _ => {
+                app.key_prefix = KeyPrefix::None;
+            }
+        }
+    }
+
+    // z - enter fold prefix mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('z'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.key_prefix = KeyPrefix::Z;
+        return Ok(Action::Continue);
+    }
+
+    // m - toggle theme (placed after z prefix handling to avoid conflict with zM)
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('m'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.toggle_theme();
+        return Ok(Action::Continue);
+    }
+
+    // R - reload document from disk (placed after z prefix handling to avoid conflict with zR)
     if matches!(
         key,
         KeyEvent {
@@ -1006,7 +1101,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
             app.auto_scroll(viewport_height);
         }
 
-        // Arrow keys - same as j/k
+        // Arrow keys - same as j/k for up/down, collapse/expand for left/right
         KeyEvent {
             code: KeyCode::Down,
             modifiers: KeyModifiers::NONE,
@@ -1023,6 +1118,29 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         } => {
             app.move_cursor_up(1);
             app.auto_scroll(viewport_height);
+        }
+
+        // Left arrow - collapse the section at or above cursor
+        KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            // Collapse if cursor is on a heading or anywhere under a non-collapsed section
+            if !app.is_cursor_under_collapsed_heading() {
+                app.collapse_at_cursor();
+            }
+        }
+
+        // Right arrow - expand the collapsed section at or above cursor
+        KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            if app.is_cursor_under_collapsed_heading() || app.is_cursor_on_collapsed_heading() {
+                app.expand_at_cursor();
+            }
         }
 
         // PageDown/PageUp - scroll by full page
@@ -1074,4 +1192,471 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     }
 
     Ok(Action::Continue)
+}
+
+/// Hit test result - what was clicked
+#[derive(Debug, Clone, PartialEq)]
+enum HitTarget {
+    Pane(PaneId, Rect),
+    Toc(Rect),
+    SplitBorder { path: Vec<usize>, is_vertical: bool },
+    None,
+}
+
+/// Handle mouse events
+pub fn handle_mouse(
+    app: &mut App,
+    mouse: MouseEvent,
+    viewport_height: usize,
+    _viewport_width: usize,
+) -> Result<()> {
+    let MouseEvent { kind, column, row, .. } = mouse;
+
+    // Get terminal size to compute layout
+    // We need to account for the status bar at the bottom
+    let term_width = crossterm::terminal::size()?.0;
+    let term_height = crossterm::terminal::size()?.1;
+
+    // Compute layout areas (must match ui.rs layout logic)
+    let layout_info = compute_layout_info(app, term_width, term_height);
+
+    match kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            handle_mouse_down(app, column, row, &layout_info, viewport_height)?;
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            handle_mouse_drag(app, column, row, &layout_info, viewport_height)?;
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            handle_mouse_up(app)?;
+        }
+        MouseEventKind::ScrollDown => {
+            handle_scroll(app, column, row, &layout_info, viewport_height, 3)?;
+        }
+        MouseEventKind::ScrollUp => {
+            handle_scroll(app, column, row, &layout_info, viewport_height, -3)?;
+        }
+        _ => {
+            // Ignore other mouse events
+        }
+    }
+
+    Ok(())
+}
+
+/// Layout information for hit testing
+#[derive(Debug)]
+struct LayoutInfo {
+    toc_rect: Option<Rect>,
+    pane_rects: std::collections::HashMap<PaneId, Rect>,
+    split_boundaries: Vec<crate::panes::SplitBoundary>,
+    panes_area: Rect, // Area where panes are rendered (for ratio calculations)
+}
+
+/// Compute layout information matching ui.rs
+fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutInfo {
+    use ratatui::layout::{Constraint, Direction as LayoutDir, Layout};
+
+    let base_chunks = if !app.security_warnings.is_empty() && app.show_security_warnings {
+        let chunks = Layout::default()
+            .direction(LayoutDir::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area (TOC + panes)
+                Constraint::Length(4),   // Security warnings pane
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(Rect::new(0, 0, term_width, term_height));
+
+        [chunks[0], chunks[2]] // [content_area, status_area]
+    } else {
+        let chunks = Layout::default()
+            .direction(LayoutDir::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(Rect::new(0, 0, term_width, term_height));
+
+        [chunks[0], chunks[1]]
+    };
+
+    // Split TOC and panes area
+    let (toc_rect, panes_area) = if app.show_toc {
+        let toc_width = app.config.toc.width as u16;
+        let chunks = if app.config.toc.side == mdx_core::config::TocSide::Left {
+            Layout::default()
+                .direction(LayoutDir::Horizontal)
+                .constraints([
+                    Constraint::Length(toc_width),
+                    Constraint::Min(1),
+                ])
+                .split(base_chunks[0])
+        } else {
+            Layout::default()
+                .direction(LayoutDir::Horizontal)
+                .constraints([
+                    Constraint::Min(1),
+                    Constraint::Length(toc_width),
+                ])
+                .split(base_chunks[0])
+        };
+
+        if app.config.toc.side == mdx_core::config::TocSide::Left {
+            (Some(chunks[0]), chunks[1])
+        } else {
+            (Some(chunks[1]), chunks[0])
+        }
+    } else {
+        (None, base_chunks[0])
+    };
+
+    // Compute pane layout and split boundaries
+    let pane_rects = app.panes.compute_layout(panes_area);
+    let split_boundaries = app.panes.compute_split_boundaries(panes_area);
+
+    LayoutInfo {
+        toc_rect,
+        pane_rects,
+        split_boundaries,
+        panes_area,
+    }
+}
+
+/// Perform hit testing to determine what was clicked
+fn hit_test(x: u16, y: u16, layout: &LayoutInfo) -> HitTarget {
+    // Check TOC first
+    if let Some(toc_rect) = layout.toc_rect {
+        if x >= toc_rect.x
+            && x < toc_rect.x + toc_rect.width
+            && y >= toc_rect.y
+            && y < toc_rect.y + toc_rect.height
+        {
+            return HitTarget::Toc(toc_rect);
+        }
+    }
+
+    // Check split boundaries (within 1 cell of boundary line)
+    for boundary in &layout.split_boundaries {
+        let is_near = match boundary.dir {
+            crate::panes::SplitDir::Vertical => {
+                // Vertical split: check if x is within 1 cell of split_x
+                let distance = if x > boundary.position {
+                    x - boundary.position
+                } else {
+                    boundary.position - x
+                };
+                distance <= 1 && y >= boundary.start && y < boundary.end
+            }
+            crate::panes::SplitDir::Horizontal => {
+                // Horizontal split: check if y is within 1 cell of split_y
+                let distance = if y > boundary.position {
+                    y - boundary.position
+                } else {
+                    boundary.position - y
+                };
+                distance <= 1 && x >= boundary.start && x < boundary.end
+            }
+        };
+
+        if is_near {
+            return HitTarget::SplitBorder {
+                path: boundary.path.clone(),
+                is_vertical: boundary.dir == crate::panes::SplitDir::Vertical,
+            };
+        }
+    }
+
+    // Check panes
+    for (pane_id, rect) in &layout.pane_rects {
+        if x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height {
+            return HitTarget::Pane(*pane_id, *rect);
+        }
+    }
+
+    HitTarget::None
+}
+
+/// Handle mouse down event
+fn handle_mouse_down(
+    app: &mut App,
+    x: u16,
+    y: u16,
+    layout: &LayoutInfo,
+    _viewport_height: usize,
+) -> Result<()> {
+    let target = hit_test(x, y, layout);
+
+    match target {
+        HitTarget::Pane(pane_id, rect) => {
+            // Focus the clicked pane
+            app.panes.focused = pane_id;
+            app.toc_focus = false;
+
+            if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                // Compute clicked line within pane
+                // Account for: top border (1), breadcrumb (1)
+                let content_y_offset = 2;
+                let y_in_pane = y.saturating_sub(rect.y);
+
+                if y_in_pane >= content_y_offset {
+                    let line_offset = (y_in_pane - content_y_offset) as usize;
+                    let clicked_line = pane.view.scroll_line + line_offset;
+
+                    // Clamp to valid line range
+                    let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                    let clicked_line = clicked_line.min(max_line);
+
+                    pane.view.cursor_line = clicked_line;
+
+                    // Regular click: clear selection and just move cursor
+                    pane.view.selection = None;
+                    pane.view.mode = crate::app::Mode::Normal;
+                    app.mouse_state = MouseState::PendingSelection {
+                        pane_id,
+                        anchor_line: clicked_line,
+                    };
+                } else {
+                    // Clicked on border or breadcrumb, just focus
+                    app.mouse_state = MouseState::Idle;
+                }
+            }
+        }
+        HitTarget::Toc(rect) => {
+            // TOC click: navigate to heading but keep focus on TOC
+            let was_focused = app.toc_focus;
+            app.toc_focus = true; // Focus TOC first
+
+            // Compute clicked row
+            // Account for: top border (1)
+            let content_y_offset = 1;
+            let y_in_toc = y.saturating_sub(rect.y);
+
+            if y_in_toc >= content_y_offset && y_in_toc < rect.height.saturating_sub(1) {
+                let row_offset = (y_in_toc - content_y_offset) as usize;
+                let clicked_row = app.toc_scroll + row_offset;
+
+                // Update toc_selected if valid
+                if clicked_row < app.doc.headings.len() {
+                    app.toc_selected = clicked_row;
+                    // Jump to the selected heading in the focused pane
+                    app.toc_jump_to_selected();
+                    // Restore TOC focus (toc_jump_to_selected doesn't change focus, but we ensure it)
+                    app.toc_focus = true;
+                }
+            }
+
+            // If TOC wasn't focused before, keep previous focus state
+            if !was_focused {
+                app.toc_focus = false;
+            }
+
+            app.mouse_state = MouseState::Idle;
+        }
+        HitTarget::SplitBorder { path, .. } => {
+            // Start resize: find the boundary to get current ratio
+            if let Some(boundary) = layout
+                .split_boundaries
+                .iter()
+                .find(|b| b.path == path)
+            {
+                app.mouse_state = MouseState::Resizing {
+                    split_path: path,
+                    start_ratio: boundary.current_ratio,
+                    start_pos: (x, y),
+                };
+            } else {
+                app.mouse_state = MouseState::Idle;
+            }
+        }
+        HitTarget::None => {
+            app.mouse_state = MouseState::Idle;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle mouse drag event
+fn handle_mouse_drag(
+    app: &mut App,
+    x: u16,
+    y: u16,
+    layout: &LayoutInfo,
+    _viewport_height: usize,
+) -> Result<()> {
+    match &app.mouse_state.clone() {
+        MouseState::PendingSelection { pane_id, anchor_line } => {
+            let pane_id = *pane_id;
+            let anchor_line = *anchor_line;
+
+            if let Some(rect) = layout.pane_rects.get(&pane_id) {
+                if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                    pane.view.mode = crate::app::Mode::VisualLine;
+                    pane.view.selection = Some(mdx_core::LineSelection::new(anchor_line));
+
+                    let content_y_offset = 2;
+                    let y_in_pane = y.saturating_sub(rect.y);
+                    if y_in_pane >= content_y_offset {
+                        let line_offset = (y_in_pane - content_y_offset) as usize;
+                        let current_line = pane.view.scroll_line + line_offset;
+                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                        let current_line = current_line.min(max_line);
+
+                        pane.view.cursor_line = current_line;
+                        if let Some(ref mut sel) = pane.view.selection {
+                            sel.cursor = current_line;
+                        }
+                    }
+
+                    app.mouse_state = MouseState::Selecting {
+                        pane_id,
+                        anchor_line,
+                    };
+                }
+            }
+        }
+        MouseState::Selecting { pane_id, anchor_line } => {
+            let pane_id = *pane_id;
+            let anchor_line = *anchor_line;
+
+            // Get the pane rect to compute current line
+            if let Some(rect) = layout.pane_rects.get(&pane_id) {
+                if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                    // Enter visual line mode if not already in it
+                    if pane.view.mode != crate::app::Mode::VisualLine {
+                        pane.view.mode = crate::app::Mode::VisualLine;
+                        pane.view.selection = Some(mdx_core::LineSelection::new(anchor_line));
+                    }
+
+                    // Compute current line under mouse
+                    let content_y_offset = 2; // top border + breadcrumb
+                    let y_in_pane = y.saturating_sub(rect.y);
+
+                    if y_in_pane >= content_y_offset {
+                        let line_offset = (y_in_pane - content_y_offset) as usize;
+                        let current_line = pane.view.scroll_line + line_offset;
+
+                        // Clamp to valid range
+                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                        let current_line = current_line.min(max_line);
+
+                        // Update cursor and selection
+                        pane.view.cursor_line = current_line;
+                        if let Some(ref mut sel) = pane.view.selection {
+                            sel.cursor = current_line;
+                        }
+                    }
+                }
+            }
+        }
+        MouseState::Resizing { split_path, start_ratio, start_pos } => {
+            // Find the boundary being resized
+            if let Some(boundary) = layout.split_boundaries.iter().find(|b| b.path == *split_path) {
+                // Compute new ratio based on mouse movement
+                let new_ratio = match boundary.dir {
+                    crate::panes::SplitDir::Vertical => {
+                        // Vertical split: movement is in x direction
+                        let delta_x = x as i32 - start_pos.0 as i32;
+                        let area_width = boundary.area.width as f32;
+                        let delta_ratio = delta_x as f32 / area_width;
+                        start_ratio + delta_ratio
+                    }
+                    crate::panes::SplitDir::Horizontal => {
+                        // Horizontal split: movement is in y direction
+                        let delta_y = y as i32 - start_pos.1 as i32;
+                        let area_height = boundary.area.height as f32;
+                        let delta_ratio = delta_y as f32 / area_height;
+                        start_ratio + delta_ratio
+                    }
+                };
+
+                // Update the split ratio (will be clamped in update_split_ratio)
+                app.panes.update_split_ratio(split_path, new_ratio);
+            }
+        }
+        MouseState::Idle => {
+            // Not dragging anything
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle mouse up event
+fn handle_mouse_up(app: &mut App) -> Result<()> {
+    match &app.mouse_state {
+        MouseState::PendingSelection { .. } => {
+            app.mouse_state = MouseState::Idle;
+        }
+        MouseState::Selecting { .. } => {
+            // Selection stays in visual line mode, just end the drag
+            // User can now use Ctrl+Shift+C to copy, or Esc to exit visual mode
+            app.mouse_state = MouseState::Idle;
+        }
+        MouseState::Resizing { .. } => {
+            // Stage 4: Finalize resize
+            app.mouse_state = MouseState::Idle;
+        }
+        MouseState::Idle => {
+            // Nothing to do
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle scroll wheel event
+fn handle_scroll(
+    app: &mut App,
+    x: u16,
+    y: u16,
+    layout: &LayoutInfo,
+    _viewport_height: usize,
+    delta: i32,
+) -> Result<()> {
+    let target = hit_test(x, y, layout);
+
+    match target {
+        HitTarget::Toc(rect) => {
+            // Scroll TOC list
+            let visible_rows = rect.height.saturating_sub(2) as usize; // -2 for borders
+            let max_scroll = app.doc.headings.len().saturating_sub(visible_rows);
+
+            // Apply scroll delta
+            if delta > 0 {
+                // Scroll down
+                app.toc_scroll = (app.toc_scroll + delta as usize).min(max_scroll);
+            } else {
+                // Scroll up
+                app.toc_scroll = app.toc_scroll.saturating_sub((-delta) as usize);
+            }
+
+            // Don't change toc_selected or focus
+        }
+        HitTarget::Pane(pane_id, rect) => {
+            // Scroll pane content without moving cursor
+            let visible_lines = rect.height.saturating_sub(3) as usize; // -3 for borders + breadcrumb
+            let doc_lines = app.doc.rope.len_lines();
+            let max_scroll = doc_lines.saturating_sub(visible_lines);
+
+            if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                // Apply scroll delta
+                if delta > 0 {
+                    // Scroll down
+                    pane.view.scroll_line = (pane.view.scroll_line + delta as usize).min(max_scroll);
+                } else {
+                    // Scroll up
+                    pane.view.scroll_line = pane.view.scroll_line.saturating_sub((-delta) as usize);
+                }
+
+                // Don't move cursor - this is different from keyboard scrolling
+                // Cursor stays at its current line, which may scroll out of view
+            }
+        }
+        _ => {
+            // Ignore scroll on other areas
+        }
+    }
+
+    Ok(())
 }
