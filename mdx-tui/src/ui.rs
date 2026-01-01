@@ -1967,7 +1967,7 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
             Span::styled("Mouse", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
         Line::from("  Click pane        Focus pane and move cursor"),
-        Line::from("  Drag in pane      Select text (line-based)"),
+        Line::from("  Ctrl+drag         Select text (line-based)"),
         Line::from("  Ctrl+Shift+C      Copy selection to clipboard"),
         Line::from("  Click TOC         Jump to heading"),
         Line::from("  Scroll wheel      Scroll pane or TOC"),

@@ -1113,7 +1113,7 @@ pub fn handle_mouse(
     viewport_height: usize,
     _viewport_width: usize,
 ) -> Result<()> {
-    let MouseEvent { kind, column, row, .. } = mouse;
+    let MouseEvent { kind, column, row, modifiers } = mouse;
 
     // Get terminal size to compute layout
     // We need to account for the status bar at the bottom
@@ -1125,10 +1125,10 @@ pub fn handle_mouse(
 
     match kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_mouse_down(app, column, row, &layout_info, viewport_height)?;
+            handle_mouse_down(app, column, row, &layout_info, viewport_height, modifiers)?;
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            handle_mouse_drag(app, column, row, &layout_info, viewport_height)?;
+            handle_mouse_drag(app, column, row, &layout_info, viewport_height, modifiers)?;
         }
         MouseEventKind::Up(MouseButton::Left) => {
             handle_mouse_up(app)?;
@@ -1265,6 +1265,7 @@ fn handle_mouse_down(
     y: u16,
     layout: &LayoutInfo,
     _viewport_height: usize,
+    modifiers: KeyModifiers,
 ) -> Result<()> {
     let target = hit_test(x, y, layout);
 
@@ -1274,11 +1275,7 @@ fn handle_mouse_down(
             app.panes.focused = pane_id;
             app.toc_focus = false;
 
-            // Clear selection on single click (will be restored if drag detected)
             if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
-                pane.view.selection = None;
-                pane.view.mode = crate::app::Mode::Normal;
-
                 // Compute clicked line within pane
                 // Account for: top border (1), breadcrumb (1)
                 let content_y_offset = 2;
@@ -1294,11 +1291,19 @@ fn handle_mouse_down(
 
                     pane.view.cursor_line = clicked_line;
 
-                    // Store for potential drag selection
-                    app.mouse_state = MouseState::Selecting {
-                        pane_id,
-                        anchor_line: clicked_line,
-                    };
+                    // Only start selection if Ctrl is held
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        // Start selection mode
+                        app.mouse_state = MouseState::Selecting {
+                            pane_id,
+                            anchor_line: clicked_line,
+                        };
+                    } else {
+                        // Regular click: clear selection and just move cursor
+                        pane.view.selection = None;
+                        pane.view.mode = crate::app::Mode::Normal;
+                        app.mouse_state = MouseState::Idle;
+                    }
                 } else {
                     // Clicked on border or breadcrumb, just focus
                     app.mouse_state = MouseState::Idle;
@@ -1367,6 +1372,7 @@ fn handle_mouse_drag(
     y: u16,
     layout: &LayoutInfo,
     _viewport_height: usize,
+    _modifiers: KeyModifiers,
 ) -> Result<()> {
     match &app.mouse_state.clone() {
         MouseState::Selecting { pane_id, anchor_line } => {
