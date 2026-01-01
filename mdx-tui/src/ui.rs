@@ -1405,7 +1405,8 @@ fn render_table_block(
             };
 
             if is_focused && is_selected {
-                line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+                // Visual line selection: bright cyan background for high visibility
+                line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
             } else if is_focused && *source_idx == cursor {
                 line = line.style(Style::default().bg(app.theme.cursor_line_bg));
             }
@@ -2367,7 +2368,8 @@ fn render_image_info_placeholder(
 
     // Apply highlighting if this is the cursor or selected line
     if is_focused && is_selected {
-        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        // Visual line selection: bright cyan background for high visibility
+        line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
     } else if is_focused && source_line == cursor {
         line = line.style(Style::default().bg(app.theme.cursor_line_bg));
     }
@@ -2456,7 +2458,8 @@ fn render_image_placeholder(
 
     // Apply highlighting if this is the cursor or selected line
     if is_focused && is_selected {
-        line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+        // Visual line selection: bright cyan background for high visibility
+        line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
     } else if is_focused && source_line == cursor {
         line = line.style(Style::default().bg(app.theme.cursor_line_bg));
     }
