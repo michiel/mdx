@@ -1152,7 +1152,8 @@ pub fn handle_mouse(
 struct LayoutInfo {
     toc_rect: Option<Rect>,
     pane_rects: std::collections::HashMap<PaneId, Rect>,
-    content_offset_y: u16, // Offset for security warnings
+    split_boundaries: Vec<crate::panes::SplitBoundary>,
+    panes_area: Rect, // Area where panes are rendered (for ratio calculations)
 }
 
 /// Compute layout information matching ui.rs
@@ -1168,14 +1169,12 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         .split(Rect::new(0, 0, term_width, term_height));
 
     let mut content_area = base_layout[0];
-    let mut content_offset_y = 0;
 
     // Account for security warnings (matches ui.rs logic)
     if app.show_security_warnings && !app.security_warnings.is_empty() {
         let warnings_height = app.security_warnings.len().min(5) as u16 + 2; // +2 for borders
         content_area.y += warnings_height;
         content_area.height = content_area.height.saturating_sub(warnings_height);
-        content_offset_y = warnings_height;
     }
 
     // Split TOC and panes area
@@ -1193,13 +1192,15 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         (None, content_area)
     };
 
-    // Compute pane layout
+    // Compute pane layout and split boundaries
     let pane_rects = app.panes.compute_layout(panes_area);
+    let split_boundaries = app.panes.compute_split_boundaries(panes_area);
 
     LayoutInfo {
         toc_rect,
         pane_rects,
-        content_offset_y,
+        split_boundaries,
+        panes_area,
     }
 }
 
@@ -1216,14 +1217,43 @@ fn hit_test(x: u16, y: u16, layout: &LayoutInfo) -> HitTarget {
         }
     }
 
+    // Check split boundaries (within 1 cell of boundary line)
+    for boundary in &layout.split_boundaries {
+        let is_near = match boundary.dir {
+            crate::panes::SplitDir::Vertical => {
+                // Vertical split: check if x is within 1 cell of split_x
+                let distance = if x > boundary.position {
+                    x - boundary.position
+                } else {
+                    boundary.position - x
+                };
+                distance <= 1 && y >= boundary.start && y < boundary.end
+            }
+            crate::panes::SplitDir::Horizontal => {
+                // Horizontal split: check if y is within 1 cell of split_y
+                let distance = if y > boundary.position {
+                    y - boundary.position
+                } else {
+                    boundary.position - y
+                };
+                distance <= 1 && x >= boundary.start && x < boundary.end
+            }
+        };
+
+        if is_near {
+            return HitTarget::SplitBorder {
+                path: boundary.path.clone(),
+                is_vertical: boundary.dir == crate::panes::SplitDir::Vertical,
+            };
+        }
+    }
+
     // Check panes
     for (pane_id, rect) in &layout.pane_rects {
         if x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height {
             return HitTarget::Pane(*pane_id, *rect);
         }
     }
-
-    // TODO: Check split borders (Stage 4)
 
     HitTarget::None
 }
@@ -1307,12 +1337,20 @@ fn handle_mouse_down(
             app.mouse_state = MouseState::Idle;
         }
         HitTarget::SplitBorder { path, .. } => {
-            // Stage 4: Start resize
-            app.mouse_state = MouseState::Resizing {
-                split_path: path,
-                start_ratio: 0.5, // Will be computed in Stage 4
-                start_pos: (x, y),
-            };
+            // Start resize: find the boundary to get current ratio
+            if let Some(boundary) = layout
+                .split_boundaries
+                .iter()
+                .find(|b| b.path == path)
+            {
+                app.mouse_state = MouseState::Resizing {
+                    split_path: path,
+                    start_ratio: boundary.current_ratio,
+                    start_pos: (x, y),
+                };
+            } else {
+                app.mouse_state = MouseState::Idle;
+            }
         }
         HitTarget::None => {
             app.mouse_state = MouseState::Idle;
@@ -1325,12 +1363,12 @@ fn handle_mouse_down(
 /// Handle mouse drag event
 fn handle_mouse_drag(
     app: &mut App,
-    _x: u16,
+    x: u16,
     y: u16,
     layout: &LayoutInfo,
     _viewport_height: usize,
 ) -> Result<()> {
-    match &app.mouse_state {
+    match &app.mouse_state.clone() {
         MouseState::Selecting { pane_id, anchor_line } => {
             let pane_id = *pane_id;
             let anchor_line = *anchor_line;
@@ -1365,8 +1403,30 @@ fn handle_mouse_drag(
                 }
             }
         }
-        MouseState::Resizing { .. } => {
-            // Stage 4: Update split ratio
+        MouseState::Resizing { split_path, start_ratio, start_pos } => {
+            // Find the boundary being resized
+            if let Some(boundary) = layout.split_boundaries.iter().find(|b| b.path == *split_path) {
+                // Compute new ratio based on mouse movement
+                let new_ratio = match boundary.dir {
+                    crate::panes::SplitDir::Vertical => {
+                        // Vertical split: movement is in x direction
+                        let delta_x = x as i32 - start_pos.0 as i32;
+                        let area_width = layout.panes_area.width as f32;
+                        let delta_ratio = delta_x as f32 / area_width;
+                        start_ratio + delta_ratio
+                    }
+                    crate::panes::SplitDir::Horizontal => {
+                        // Horizontal split: movement is in y direction
+                        let delta_y = y as i32 - start_pos.1 as i32;
+                        let area_height = layout.panes_area.height as f32;
+                        let delta_ratio = delta_y as f32 / area_height;
+                        start_ratio + delta_ratio
+                    }
+                };
+
+                // Update the split ratio (will be clamped in update_split_ratio)
+                app.panes.update_split_ratio(split_path, new_ratio);
+            }
         }
         MouseState::Idle => {
             // Not dragging anything
