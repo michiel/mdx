@@ -878,19 +878,6 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
-    // M - toggle theme
-    if matches!(
-        key,
-        KeyEvent {
-            code: KeyCode::Char('M'),
-            modifiers: KeyModifiers::SHIFT,
-            ..
-        }
-    ) {
-        app.toggle_theme();
-        return Ok(Action::Continue);
-    }
-
     // ? - toggle help dialog
     if matches!(
         key,
@@ -943,7 +930,98 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Continue);
     }
 
-    // R - reload document from disk
+    // Handle 'z' prefix for fold commands
+    if app.key_prefix == KeyPrefix::Z {
+        match key {
+            // za - toggle fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('a'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toggle_collapse_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zo - open fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('o'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.expand_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zc - close fold at cursor
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.collapse_at_cursor();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zM - close all folds
+            KeyEvent {
+                code: KeyCode::Char('M'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.collapse_all_headings(None);
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // zR - open all folds
+            KeyEvent {
+                code: KeyCode::Char('R'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.expand_all_headings();
+                app.key_prefix = KeyPrefix::None;
+                return Ok(Action::Continue);
+            }
+
+            // Any other key cancels the prefix
+            _ => {
+                app.key_prefix = KeyPrefix::None;
+            }
+        }
+    }
+
+    // z - enter fold prefix mode
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('z'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.key_prefix = KeyPrefix::Z;
+        return Ok(Action::Continue);
+    }
+
+    // m - toggle theme (placed after z prefix handling to avoid conflict with zM)
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('m'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) {
+        app.toggle_theme();
+        return Ok(Action::Continue);
+    }
+
+    // R - reload document from disk (placed after z prefix handling to avoid conflict with zR)
     if matches!(
         key,
         KeyEvent {
@@ -1023,7 +1101,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
             app.auto_scroll(viewport_height);
         }
 
-        // Arrow keys - same as j/k
+        // Arrow keys - same as j/k for up/down, collapse/expand for left/right
         KeyEvent {
             code: KeyCode::Down,
             modifiers: KeyModifiers::NONE,
@@ -1040,6 +1118,29 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         } => {
             app.move_cursor_up(1);
             app.auto_scroll(viewport_height);
+        }
+
+        // Left arrow - collapse the section at or above cursor
+        KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            // Collapse if cursor is on a heading or anywhere under a non-collapsed section
+            if !app.is_cursor_under_collapsed_heading() {
+                app.collapse_at_cursor();
+            }
+        }
+
+        // Right arrow - expand the collapsed section at or above cursor
+        KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => {
+            if app.is_cursor_under_collapsed_heading() || app.is_cursor_on_collapsed_heading() {
+                app.expand_at_cursor();
+            }
         }
 
         // PageDown/PageUp - scroll by full page
@@ -1109,7 +1210,7 @@ pub fn handle_mouse(
     viewport_height: usize,
     _viewport_width: usize,
 ) -> Result<()> {
-    let MouseEvent { kind, column, row, modifiers } = mouse;
+    let MouseEvent { kind, column, row, .. } = mouse;
 
     // Get terminal size to compute layout
     // We need to account for the status bar at the bottom
@@ -1121,10 +1222,10 @@ pub fn handle_mouse(
 
     match kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_mouse_down(app, column, row, &layout_info, viewport_height, modifiers)?;
+            handle_mouse_down(app, column, row, &layout_info, viewport_height)?;
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            handle_mouse_drag(app, column, row, &layout_info, viewport_height, modifiers)?;
+            handle_mouse_drag(app, column, row, &layout_info, viewport_height)?;
         }
         MouseEventKind::Up(MouseButton::Left) => {
             handle_mouse_up(app)?;
@@ -1156,36 +1257,57 @@ struct LayoutInfo {
 fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutInfo {
     use ratatui::layout::{Constraint, Direction as LayoutDir, Layout};
 
-    let base_layout = Layout::default()
-        .direction(LayoutDir::Vertical)
-        .constraints([
-            Constraint::Min(1),      // Main content area
-            Constraint::Length(1),   // Status bar
-        ])
-        .split(Rect::new(0, 0, term_width, term_height));
+    let base_chunks = if !app.security_warnings.is_empty() && app.show_security_warnings {
+        let chunks = Layout::default()
+            .direction(LayoutDir::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area (TOC + panes)
+                Constraint::Length(4),   // Security warnings pane
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(Rect::new(0, 0, term_width, term_height));
 
-    let mut content_area = base_layout[0];
+        [chunks[0], chunks[2]] // [content_area, status_area]
+    } else {
+        let chunks = Layout::default()
+            .direction(LayoutDir::Vertical)
+            .constraints([
+                Constraint::Min(1),      // Main content area
+                Constraint::Length(1),   // Status bar
+            ])
+            .split(Rect::new(0, 0, term_width, term_height));
 
-    // Account for security warnings (matches ui.rs logic)
-    if app.show_security_warnings && !app.security_warnings.is_empty() {
-        let warnings_height = app.security_warnings.len().min(5) as u16 + 2; // +2 for borders
-        content_area.y += warnings_height;
-        content_area.height = content_area.height.saturating_sub(warnings_height);
-    }
+        [chunks[0], chunks[1]]
+    };
 
     // Split TOC and panes area
     let (toc_rect, panes_area) = if app.show_toc {
         let toc_width = app.config.toc.width as u16;
-        let chunks = Layout::default()
-            .direction(LayoutDir::Horizontal)
-            .constraints([
-                Constraint::Length(toc_width),
-                Constraint::Min(1),
-            ])
-            .split(content_area);
-        (Some(chunks[0]), chunks[1])
+        let chunks = if app.config.toc.side == mdx_core::config::TocSide::Left {
+            Layout::default()
+                .direction(LayoutDir::Horizontal)
+                .constraints([
+                    Constraint::Length(toc_width),
+                    Constraint::Min(1),
+                ])
+                .split(base_chunks[0])
+        } else {
+            Layout::default()
+                .direction(LayoutDir::Horizontal)
+                .constraints([
+                    Constraint::Min(1),
+                    Constraint::Length(toc_width),
+                ])
+                .split(base_chunks[0])
+        };
+
+        if app.config.toc.side == mdx_core::config::TocSide::Left {
+            (Some(chunks[0]), chunks[1])
+        } else {
+            (Some(chunks[1]), chunks[0])
+        }
     } else {
-        (None, content_area)
+        (None, base_chunks[0])
     };
 
     // Compute pane layout and split boundaries
@@ -1261,7 +1383,6 @@ fn handle_mouse_down(
     y: u16,
     layout: &LayoutInfo,
     _viewport_height: usize,
-    modifiers: KeyModifiers,
 ) -> Result<()> {
     let target = hit_test(x, y, layout);
 
@@ -1287,23 +1408,13 @@ fn handle_mouse_down(
 
                     pane.view.cursor_line = clicked_line;
 
-                    // Only start selection if Ctrl is held
-                    if modifiers.contains(KeyModifiers::CONTROL) {
-                        // Enter visual line mode and create selection immediately
-                        pane.view.mode = crate::app::Mode::VisualLine;
-                        pane.view.selection = Some(mdx_core::LineSelection::new(clicked_line));
-
-                        // Start selection mode for potential drag
-                        app.mouse_state = MouseState::Selecting {
-                            pane_id,
-                            anchor_line: clicked_line,
-                        };
-                    } else {
-                        // Regular click: clear selection and just move cursor
-                        pane.view.selection = None;
-                        pane.view.mode = crate::app::Mode::Normal;
-                        app.mouse_state = MouseState::Idle;
-                    }
+                    // Regular click: clear selection and just move cursor
+                    pane.view.selection = None;
+                    pane.view.mode = crate::app::Mode::Normal;
+                    app.mouse_state = MouseState::PendingSelection {
+                        pane_id,
+                        anchor_line: clicked_line,
+                    };
                 } else {
                     // Clicked on border or breadcrumb, just focus
                     app.mouse_state = MouseState::Idle;
@@ -1320,7 +1431,7 @@ fn handle_mouse_down(
             let content_y_offset = 1;
             let y_in_toc = y.saturating_sub(rect.y);
 
-            if y_in_toc >= content_y_offset && y_in_toc < rect.y + rect.height.saturating_sub(1) {
+            if y_in_toc >= content_y_offset && y_in_toc < rect.height.saturating_sub(1) {
                 let row_offset = (y_in_toc - content_y_offset) as usize;
                 let clicked_row = app.toc_scroll + row_offset;
 
@@ -1372,9 +1483,38 @@ fn handle_mouse_drag(
     y: u16,
     layout: &LayoutInfo,
     _viewport_height: usize,
-    _modifiers: KeyModifiers,
 ) -> Result<()> {
     match &app.mouse_state.clone() {
+        MouseState::PendingSelection { pane_id, anchor_line } => {
+            let pane_id = *pane_id;
+            let anchor_line = *anchor_line;
+
+            if let Some(rect) = layout.pane_rects.get(&pane_id) {
+                if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                    pane.view.mode = crate::app::Mode::VisualLine;
+                    pane.view.selection = Some(mdx_core::LineSelection::new(anchor_line));
+
+                    let content_y_offset = 2;
+                    let y_in_pane = y.saturating_sub(rect.y);
+                    if y_in_pane >= content_y_offset {
+                        let line_offset = (y_in_pane - content_y_offset) as usize;
+                        let current_line = pane.view.scroll_line + line_offset;
+                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                        let current_line = current_line.min(max_line);
+
+                        pane.view.cursor_line = current_line;
+                        if let Some(ref mut sel) = pane.view.selection {
+                            sel.cursor = current_line;
+                        }
+                    }
+
+                    app.mouse_state = MouseState::Selecting {
+                        pane_id,
+                        anchor_line,
+                    };
+                }
+            }
+        }
         MouseState::Selecting { pane_id, anchor_line } => {
             let pane_id = *pane_id;
             let anchor_line = *anchor_line;
@@ -1417,14 +1557,14 @@ fn handle_mouse_drag(
                     crate::panes::SplitDir::Vertical => {
                         // Vertical split: movement is in x direction
                         let delta_x = x as i32 - start_pos.0 as i32;
-                        let area_width = layout.panes_area.width as f32;
+                        let area_width = boundary.area.width as f32;
                         let delta_ratio = delta_x as f32 / area_width;
                         start_ratio + delta_ratio
                     }
                     crate::panes::SplitDir::Horizontal => {
                         // Horizontal split: movement is in y direction
                         let delta_y = y as i32 - start_pos.1 as i32;
-                        let area_height = layout.panes_area.height as f32;
+                        let area_height = boundary.area.height as f32;
                         let delta_ratio = delta_y as f32 / area_height;
                         start_ratio + delta_ratio
                     }
@@ -1445,6 +1585,9 @@ fn handle_mouse_drag(
 /// Handle mouse up event
 fn handle_mouse_up(app: &mut App) -> Result<()> {
     match &app.mouse_state {
+        MouseState::PendingSelection { .. } => {
+            app.mouse_state = MouseState::Idle;
+        }
         MouseState::Selecting { .. } => {
             // Selection stays in visual line mode, just end the drag
             // User can now use Ctrl+Shift+C to copy, or Esc to exit visual mode

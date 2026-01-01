@@ -8,6 +8,7 @@
 //! - Theme system
 
 pub mod app;
+pub mod collapse;
 pub mod editor;
 pub mod event;
 pub mod input;

@@ -73,6 +73,7 @@ pub struct SplitBoundary {
     pub start: u16,           // Starting coordinate (Y for vertical, X for horizontal)
     pub end: u16,             // Ending coordinate (Y for vertical, X for horizontal)
     pub current_ratio: f32,   // Current ratio of this split
+    pub area: Rect,           // Area covered by this split
 }
 
 /// Direction of a split
@@ -330,6 +331,7 @@ impl PaneManager {
                     start,
                     end,
                     current_ratio: *ratio,
+                    area,
                 });
 
                 // Recurse into children
