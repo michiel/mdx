@@ -54,6 +54,26 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         return Ok(Action::Quit);
     }
 
+    // Handle Ctrl+Shift+C - copy selection to clipboard
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('C'),
+            modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ..
+        }
+    ) {
+        match app.yank_selection() {
+            Ok(num_lines) => {
+                app.set_success_message(format!("Copied {} line(s) to clipboard", num_lines));
+            }
+            Err(e) => {
+                app.set_error_message(format!("Copy failed: {}", e));
+            }
+        }
+        return Ok(Action::Continue);
+    }
+
     // Handle help dialog - close with Esc or ?
     if app.show_help {
         if matches!(
@@ -1219,12 +1239,41 @@ fn handle_mouse_down(
     let target = hit_test(x, y, layout);
 
     match target {
-        HitTarget::Pane(pane_id, _rect) => {
-            // Stage 2: Click to focus and potentially start selection
-            app.mouse_state = MouseState::Selecting {
-                pane_id,
-                anchor_line: 0, // Will be computed in Stage 2
-            };
+        HitTarget::Pane(pane_id, rect) => {
+            // Focus the clicked pane
+            app.panes.focused = pane_id;
+            app.toc_focus = false;
+
+            // Clear selection on single click (will be restored if drag detected)
+            if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                pane.view.selection = None;
+                pane.view.mode = crate::app::Mode::Normal;
+
+                // Compute clicked line within pane
+                // Account for: top border (1), breadcrumb (1)
+                let content_y_offset = 2;
+                let y_in_pane = y.saturating_sub(rect.y);
+
+                if y_in_pane >= content_y_offset {
+                    let line_offset = (y_in_pane - content_y_offset) as usize;
+                    let clicked_line = pane.view.scroll_line + line_offset;
+
+                    // Clamp to valid line range
+                    let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                    let clicked_line = clicked_line.min(max_line);
+
+                    pane.view.cursor_line = clicked_line;
+
+                    // Store for potential drag selection
+                    app.mouse_state = MouseState::Selecting {
+                        pane_id,
+                        anchor_line: clicked_line,
+                    };
+                } else {
+                    // Clicked on border or breadcrumb, just focus
+                    app.mouse_state = MouseState::Idle;
+                }
+            }
         }
         HitTarget::Toc(_rect) => {
             // Stage 3: TOC click handling
@@ -1250,13 +1299,44 @@ fn handle_mouse_down(
 fn handle_mouse_drag(
     app: &mut App,
     _x: u16,
-    _y: u16,
-    _layout: &LayoutInfo,
+    y: u16,
+    layout: &LayoutInfo,
     _viewport_height: usize,
 ) -> Result<()> {
     match &app.mouse_state {
-        MouseState::Selecting { .. } => {
-            // Stage 2: Update selection
+        MouseState::Selecting { pane_id, anchor_line } => {
+            let pane_id = *pane_id;
+            let anchor_line = *anchor_line;
+
+            // Get the pane rect to compute current line
+            if let Some(rect) = layout.pane_rects.get(&pane_id) {
+                if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
+                    // Enter visual line mode if not already in it
+                    if pane.view.mode != crate::app::Mode::VisualLine {
+                        pane.view.mode = crate::app::Mode::VisualLine;
+                        pane.view.selection = Some(mdx_core::LineSelection::new(anchor_line));
+                    }
+
+                    // Compute current line under mouse
+                    let content_y_offset = 2; // top border + breadcrumb
+                    let y_in_pane = y.saturating_sub(rect.y);
+
+                    if y_in_pane >= content_y_offset {
+                        let line_offset = (y_in_pane - content_y_offset) as usize;
+                        let current_line = pane.view.scroll_line + line_offset;
+
+                        // Clamp to valid range
+                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
+                        let current_line = current_line.min(max_line);
+
+                        // Update cursor and selection
+                        pane.view.cursor_line = current_line;
+                        if let Some(ref mut sel) = pane.view.selection {
+                            sel.cursor = current_line;
+                        }
+                    }
+                }
+            }
         }
         MouseState::Resizing { .. } => {
             // Stage 4: Update split ratio
@@ -1273,7 +1353,8 @@ fn handle_mouse_drag(
 fn handle_mouse_up(app: &mut App) -> Result<()> {
     match &app.mouse_state {
         MouseState::Selecting { .. } => {
-            // Stage 2: Finalize selection
+            // Selection stays in visual line mode, just end the drag
+            // User can now use Ctrl+Shift+C to copy, or Esc to exit visual mode
             app.mouse_state = MouseState::Idle;
         }
         MouseState::Resizing { .. } => {
