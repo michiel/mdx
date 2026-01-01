@@ -465,7 +465,8 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
         // Apply highlighting - priority order: selection > cursor > code block
         if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+            // Visual line selection: bright cyan background for high visibility
+            line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
         } else if is_focused && line_idx == cursor {
             line = line.style(Style::default().bg(app.theme.cursor_line_bg));
         } else if is_code_block_line {
@@ -858,7 +859,8 @@ fn render_raw_text(
 
         // Apply highlighting - priority order: selection > cursor
         if is_focused && is_selected {
-            line = line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::REVERSED));
+            // Visual line selection: bright cyan background for high visibility
+            line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
         } else if is_focused && line_idx == cursor {
             line = line.style(Style::default().bg(app.theme.cursor_line_bg));
         }
