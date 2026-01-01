@@ -291,17 +291,6 @@ Contributions are welcome. Please ensure:
 - Clippy is happy (`cargo clippy`)
 - Commit messages are clear and descriptive
 
-## Roadmap
-
-- ✅ Collapsible sections with vim-style folding
-- Improved source-to-render line mapping for more accurate selection and diff gutters
-- Enhanced Markdown rendering with additional CommonMark features
-- Customisable keybindings via configuration file
-- Support for following Markdown links
-- Document bookmarks and history
-- Persistent fold state across sessions
-- Collapsible code blocks and lists
-
 ## Licence
 
 Dual-licensed under MIT or Apache-2.0.
