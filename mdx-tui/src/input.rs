@@ -55,14 +55,10 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     }
 
     // Handle Ctrl+Shift+C - copy selection to clipboard
-    if matches!(
-        key,
-        KeyEvent {
-            code: KeyCode::Char('C'),
-            modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-            ..
-        }
-    ) {
+    if key.code == KeyCode::Char('C')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && key.modifiers.contains(KeyModifiers::SHIFT)
+    {
         match app.yank_selection() {
             Ok(num_lines) => {
                 app.set_success_message(format!("Copied {} line(s) to clipboard", num_lines));
@@ -1293,7 +1289,11 @@ fn handle_mouse_down(
 
                     // Only start selection if Ctrl is held
                     if modifiers.contains(KeyModifiers::CONTROL) {
-                        // Start selection mode
+                        // Enter visual line mode and create selection immediately
+                        pane.view.mode = crate::app::Mode::VisualLine;
+                        pane.view.selection = Some(mdx_core::LineSelection::new(clicked_line));
+
+                        // Start selection mode for potential drag
                         app.mouse_state = MouseState::Selecting {
                             pane_id,
                             anchor_line: clicked_line,
