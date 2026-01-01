@@ -1,9 +1,10 @@
 //! Input handling and keybindings
 
-use crate::app::{App, KeyPrefix};
-use crate::panes::{Direction, SplitDir};
+use crate::app::{App, KeyPrefix, MouseState};
+use crate::panes::{Direction, PaneId, SplitDir};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 /// Result of handling input
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1074,4 +1075,247 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     }
 
     Ok(Action::Continue)
+}
+
+/// Hit test result - what was clicked
+#[derive(Debug, Clone, PartialEq)]
+enum HitTarget {
+    Pane(PaneId, Rect),
+    Toc(Rect),
+    SplitBorder { path: Vec<usize>, is_vertical: bool },
+    None,
+}
+
+/// Handle mouse events
+pub fn handle_mouse(
+    app: &mut App,
+    mouse: MouseEvent,
+    viewport_height: usize,
+    _viewport_width: usize,
+) -> Result<()> {
+    let MouseEvent { kind, column, row, .. } = mouse;
+
+    // Get terminal size to compute layout
+    // We need to account for the status bar at the bottom
+    let term_width = crossterm::terminal::size()?.0;
+    let term_height = crossterm::terminal::size()?.1;
+
+    // Compute layout areas (must match ui.rs layout logic)
+    let layout_info = compute_layout_info(app, term_width, term_height);
+
+    match kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            handle_mouse_down(app, column, row, &layout_info, viewport_height)?;
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            handle_mouse_drag(app, column, row, &layout_info, viewport_height)?;
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            handle_mouse_up(app)?;
+        }
+        MouseEventKind::ScrollDown => {
+            handle_scroll(app, column, row, &layout_info, viewport_height, 3)?;
+        }
+        MouseEventKind::ScrollUp => {
+            handle_scroll(app, column, row, &layout_info, viewport_height, -3)?;
+        }
+        _ => {
+            // Ignore other mouse events
+        }
+    }
+
+    Ok(())
+}
+
+/// Layout information for hit testing
+#[derive(Debug)]
+struct LayoutInfo {
+    toc_rect: Option<Rect>,
+    pane_rects: std::collections::HashMap<PaneId, Rect>,
+    content_offset_y: u16, // Offset for security warnings
+}
+
+/// Compute layout information matching ui.rs
+fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutInfo {
+    use ratatui::layout::{Constraint, Direction as LayoutDir, Layout};
+
+    let base_layout = Layout::default()
+        .direction(LayoutDir::Vertical)
+        .constraints([
+            Constraint::Min(1),      // Main content area
+            Constraint::Length(1),   // Status bar
+        ])
+        .split(Rect::new(0, 0, term_width, term_height));
+
+    let mut content_area = base_layout[0];
+    let mut content_offset_y = 0;
+
+    // Account for security warnings (matches ui.rs logic)
+    if app.show_security_warnings && !app.security_warnings.is_empty() {
+        let warnings_height = app.security_warnings.len().min(5) as u16 + 2; // +2 for borders
+        content_area.y += warnings_height;
+        content_area.height = content_area.height.saturating_sub(warnings_height);
+        content_offset_y = warnings_height;
+    }
+
+    // Split TOC and panes area
+    let (toc_rect, panes_area) = if app.show_toc {
+        let toc_width = app.config.toc.width as u16;
+        let chunks = Layout::default()
+            .direction(LayoutDir::Horizontal)
+            .constraints([
+                Constraint::Length(toc_width),
+                Constraint::Min(1),
+            ])
+            .split(content_area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, content_area)
+    };
+
+    // Compute pane layout
+    let pane_rects = app.panes.compute_layout(panes_area);
+
+    LayoutInfo {
+        toc_rect,
+        pane_rects,
+        content_offset_y,
+    }
+}
+
+/// Perform hit testing to determine what was clicked
+fn hit_test(x: u16, y: u16, layout: &LayoutInfo) -> HitTarget {
+    // Check TOC first
+    if let Some(toc_rect) = layout.toc_rect {
+        if x >= toc_rect.x
+            && x < toc_rect.x + toc_rect.width
+            && y >= toc_rect.y
+            && y < toc_rect.y + toc_rect.height
+        {
+            return HitTarget::Toc(toc_rect);
+        }
+    }
+
+    // Check panes
+    for (pane_id, rect) in &layout.pane_rects {
+        if x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height {
+            return HitTarget::Pane(*pane_id, *rect);
+        }
+    }
+
+    // TODO: Check split borders (Stage 4)
+
+    HitTarget::None
+}
+
+/// Handle mouse down event
+fn handle_mouse_down(
+    app: &mut App,
+    x: u16,
+    y: u16,
+    layout: &LayoutInfo,
+    _viewport_height: usize,
+) -> Result<()> {
+    let target = hit_test(x, y, layout);
+
+    match target {
+        HitTarget::Pane(pane_id, _rect) => {
+            // Stage 2: Click to focus and potentially start selection
+            app.mouse_state = MouseState::Selecting {
+                pane_id,
+                anchor_line: 0, // Will be computed in Stage 2
+            };
+        }
+        HitTarget::Toc(_rect) => {
+            // Stage 3: TOC click handling
+            app.mouse_state = MouseState::Idle;
+        }
+        HitTarget::SplitBorder { path, .. } => {
+            // Stage 4: Start resize
+            app.mouse_state = MouseState::Resizing {
+                split_path: path,
+                start_ratio: 0.5, // Will be computed in Stage 4
+                start_pos: (x, y),
+            };
+        }
+        HitTarget::None => {
+            app.mouse_state = MouseState::Idle;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle mouse drag event
+fn handle_mouse_drag(
+    app: &mut App,
+    _x: u16,
+    _y: u16,
+    _layout: &LayoutInfo,
+    _viewport_height: usize,
+) -> Result<()> {
+    match &app.mouse_state {
+        MouseState::Selecting { .. } => {
+            // Stage 2: Update selection
+        }
+        MouseState::Resizing { .. } => {
+            // Stage 4: Update split ratio
+        }
+        MouseState::Idle => {
+            // Not dragging anything
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle mouse up event
+fn handle_mouse_up(app: &mut App) -> Result<()> {
+    match &app.mouse_state {
+        MouseState::Selecting { .. } => {
+            // Stage 2: Finalize selection
+            app.mouse_state = MouseState::Idle;
+        }
+        MouseState::Resizing { .. } => {
+            // Stage 4: Finalize resize
+            app.mouse_state = MouseState::Idle;
+        }
+        MouseState::Idle => {
+            // Nothing to do
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle scroll wheel event
+fn handle_scroll(
+    app: &mut App,
+    x: u16,
+    y: u16,
+    layout: &LayoutInfo,
+    _viewport_height: usize,
+    delta: i32,
+) -> Result<()> {
+    let target = hit_test(x, y, layout);
+
+    match target {
+        HitTarget::Toc(rect) => {
+            // Stage 3: Scroll TOC
+            let _visible_rows = rect.height.saturating_sub(2) as usize; // -2 for borders
+            // TODO: Adjust toc_scroll
+        }
+        HitTarget::Pane(pane_id, rect) => {
+            // Stage 3: Scroll pane
+            let _visible_lines = rect.height.saturating_sub(3) as usize; // -3 for borders + breadcrumb
+            // TODO: Adjust pane's scroll_line
+            let _ = pane_id; // Suppress unused warning for now
+        }
+        _ => {
+            // Ignore scroll on other areas
+        }
+    }
+
+    let _ = delta; // Suppress unused warning for now
+    Ok(())
 }

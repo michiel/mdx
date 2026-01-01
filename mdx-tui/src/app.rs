@@ -1,7 +1,7 @@
 //! Application state
 
 use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
-use crate::panes::PaneManager;
+use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
 
 /// Application mode
@@ -10,6 +10,21 @@ pub enum Mode {
     Normal,
     VisualLine,
     Search,
+}
+
+/// Mouse interaction state
+#[derive(Debug, Clone, PartialEq)]
+pub enum MouseState {
+    Idle,
+    Selecting {
+        pane_id: PaneId,
+        anchor_line: usize,
+    },
+    Resizing {
+        split_path: Vec<usize>, // Path to the split being resized
+        start_ratio: f32,
+        start_pos: (u16, u16), // Starting mouse position
+    },
 }
 
 /// Key prefix state for multi-key sequences
@@ -74,6 +89,7 @@ pub struct App {
     pub security_warnings: Vec<mdx_core::SecurityEvent>,
     pub show_security_warnings: bool,
     pub status_message: Option<(String, StatusMessageKind)>,
+    pub mouse_state: MouseState,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -141,6 +157,7 @@ impl App {
             security_warnings: warnings,
             show_security_warnings,
             status_message: None,
+            mouse_state: MouseState::Idle,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
