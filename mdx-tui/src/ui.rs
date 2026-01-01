@@ -461,18 +461,33 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             false
         };
 
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting - priority order: selection > cursor > code block
+        // Apply highlighting directly to spans - priority order: selection > cursor > code block
         if is_focused && is_selected {
-            // Visual line selection: bright cyan background for high visibility
-            line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
+            // Visual line selection: apply cyan background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_focused && line_idx == cursor {
-            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+            // Cursor line: apply cursor background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_code_block_line {
-            // Apply code block background to entire line
-            line = line.style(Style::default().bg(app.theme.code_block_bg));
+            // Code block: apply code block background to each span (if not already styled)
+            line_spans = line_spans.into_iter().map(|mut span| {
+                if span.style.bg.is_none() {
+                    let new_style = span.style.bg(app.theme.code_block_bg);
+                    span.style = new_style;
+                }
+                span
+            }).collect();
         }
+
+        let line = Line::from(line_spans);
 
         // Detect if this is a list item and calculate continuation indent
         let list_indent = if !in_code_block {
@@ -855,16 +870,24 @@ fn render_raw_text(
             false
         };
 
-        let mut line = Line::from(line_spans);
-
-        // Apply highlighting - priority order: selection > cursor
+        // Apply highlighting directly to spans - priority order: selection > cursor
         if is_focused && is_selected {
-            // Visual line selection: bright cyan background for high visibility
-            line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
+            // Visual line selection: apply cyan background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            }).collect();
         } else if is_focused && line_idx == cursor {
-            line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+            // Cursor line: apply cursor background to each span
+            line_spans = line_spans.into_iter().map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            }).collect();
         }
 
+        let line = Line::from(line_spans);
         lines.push(line);
     }
 
@@ -1396,21 +1419,30 @@ fn render_table_block(
                 line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
             }
 
-            let mut line = Line::from(line_spans);
-
             let is_selected = if let Some((start, end)) = selection_range {
                 *source_idx >= start && *source_idx <= end
             } else {
                 false
             };
 
+            // Apply highlighting directly to spans - priority order: selection > cursor
             if is_focused && is_selected {
-                // Visual line selection: bright cyan background for high visibility
-                line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
+                // Visual line selection: apply cyan background to each span
+                line_spans = line_spans.into_iter().map(|mut span| {
+                    let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                    span.style = new_style;
+                    span
+                }).collect();
             } else if is_focused && *source_idx == cursor {
-                line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+                // Cursor line: apply cursor background to each span
+                line_spans = line_spans.into_iter().map(|mut span| {
+                    let new_style = span.style.bg(app.theme.cursor_line_bg);
+                    span.style = new_style;
+                    span
+                }).collect();
             }
 
+            let line = Line::from(line_spans);
             rendered.push(line);
         }
     }
@@ -2364,16 +2396,24 @@ fn render_image_info_placeholder(
             .add_modifier(Modifier::BOLD)
     ));
 
-    let mut line = Line::from(line_spans);
-
-    // Apply highlighting if this is the cursor or selected line
+    // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
-        // Visual line selection: bright cyan background for high visibility
-        line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
+        // Visual line selection: apply cyan background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+            span.style = new_style;
+            span
+        }).collect();
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        // Cursor line: apply cursor background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(app.theme.cursor_line_bg);
+            span.style = new_style;
+            span
+        }).collect();
     }
 
+    let line = Line::from(line_spans);
     lines.push(line);
 
     (lines, 1)
@@ -2454,16 +2494,24 @@ fn render_image_placeholder(
             .add_modifier(Modifier::BOLD)
     ));
 
-    let mut line = Line::from(line_spans);
-
-    // Apply highlighting if this is the cursor or selected line
+    // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
-        // Visual line selection: bright cyan background for high visibility
-        line = line.style(Style::default().bg(Color::Cyan).fg(Color::Black));
+        // Visual line selection: apply cyan background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+            span.style = new_style;
+            span
+        }).collect();
     } else if is_focused && source_line == cursor {
-        line = line.style(Style::default().bg(app.theme.cursor_line_bg));
+        // Cursor line: apply cursor background to each span
+        line_spans = line_spans.into_iter().map(|mut span| {
+            let new_style = span.style.bg(app.theme.cursor_line_bg);
+            span.style = new_style;
+            span
+        }).collect();
     }
 
+    let line = Line::from(line_spans);
     lines.push(line);
 
     (lines, 1)
