@@ -15,6 +15,17 @@ try {
     exit 1
 }
 
+if ($release.message) {
+    if ($release.message -match "API rate limit exceeded") {
+        Write-Host "Error: GitHub API rate limit exceeded. Try again later or set a token:" -ForegroundColor Red
+        Write-Host "  `$env:GITHUB_TOKEN = '...'" -ForegroundColor Yellow
+    } else {
+        Write-Host "Error: GitHub API response error:" -ForegroundColor Red
+        Write-Host $release.message -ForegroundColor Red
+    }
+    exit 1
+}
+
 # Find Windows asset
 $asset = $release.assets | Where-Object { $_.name -eq "mdx-windows-x86_64.exe" }
 if (-not $asset) {
