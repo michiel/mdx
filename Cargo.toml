@@ -7,11 +7,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-authors = ["MDX Contributors"]
+authors = ["Michiel Kalkman <michiel@nosuchtype.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/your-repo/mdx"
+repository = "https://github.com/michiel/mdx"
 
 [workspace.dependencies]
 # Core text handling
