@@ -1911,7 +1911,7 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
     // Create a centered popup area
     let area = frame.area();
     let popup_width = 70.min(area.width.saturating_sub(4));
-    let popup_height = 33.min(area.height.saturating_sub(4));
+    let popup_height = 42.min(area.height.saturating_sub(4));
 
     let popup_area = ratatui::layout::Rect {
         x: (area.width.saturating_sub(popup_width)) / 2,
@@ -1962,6 +1962,16 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  Ctrl+w hjkl/↑↓←→  Move focus between panes"),
         Line::from("  Ctrl+↑↓←→         Move focus between panes"),
         Line::from("  q                 Close pane (quit if last)"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Mouse", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  Click pane        Focus pane and move cursor"),
+        Line::from("  Drag in pane      Select text (line-based)"),
+        Line::from("  Ctrl+Shift+C      Copy selection to clipboard"),
+        Line::from("  Click TOC         Jump to heading"),
+        Line::from("  Scroll wheel      Scroll pane or TOC"),
+        Line::from("  Drag border       Resize split panes"),
         Line::from(""),
         Line::from(vec![
             Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
