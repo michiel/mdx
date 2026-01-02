@@ -12,6 +12,7 @@ pub enum Action {
     Continue,
     Quit,
     OpenEditor,
+    Redraw,
 }
 
 /// Handle a key event with viewport dimensions for scroll commands
@@ -52,6 +53,19 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     ) {
         app.quit();
         return Ok(Action::Quit);
+    }
+
+    // Handle Ctrl+L - force redraw/refresh
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        app.clear_status_message();
+        return Ok(Action::Redraw);
     }
 
     // Handle Ctrl+Shift+C - copy selection to clipboard

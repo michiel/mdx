@@ -347,6 +347,10 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             list_item_indents.push(None);
 
             // Skip to the end of the collapsed range
+            let skipped_lines = range.end.saturating_sub(range.start);
+            if skipped_lines > 0 && visible_end < line_count {
+                visible_end = (visible_end + skipped_lines).min(line_count);
+            }
             line_idx = range.end + 1;
             continue;
         }
@@ -2175,6 +2179,7 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  e                 Open in $EDITOR"),
         Line::from("  r                 Toggle raw/rendered mode"),
         Line::from("  R                 Reload document"),
+        Line::from("  Ctrl+L            Redraw/refresh screen"),
         Line::from("  ?                 Toggle this help"),
         Line::from("  Ctrl+C            Force quit"),
     ];

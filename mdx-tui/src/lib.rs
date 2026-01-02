@@ -97,6 +97,9 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                             input::Action::Quit => {
                                 // Quit already handled by should_quit flag
                             }
+                            input::Action::Redraw => {
+                                terminal.clear().context("Failed to clear terminal")?;
+                            }
                             input::Action::Continue => {
                                 // Nothing to do
                             }
