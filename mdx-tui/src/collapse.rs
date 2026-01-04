@@ -36,7 +36,9 @@ pub fn compute_heading_range(heading_line: usize, doc: &Document) -> Option<Coll
     let heading = doc.headings.iter().find(|h| h.line == heading_line)?;
 
     // Find the next heading at the same level or higher (lower level number)
-    let next_heading = doc.headings.iter()
+    let next_heading = doc
+        .headings
+        .iter()
         .find(|h| h.line > heading_line && h.level <= heading.level);
 
     // Determine end line
@@ -261,7 +263,8 @@ mod tests {
 
     #[test]
     fn test_heading_text_truncation() {
-        let long_heading = "This is a very long heading that should be truncated for display purposes";
+        let long_heading =
+            "This is a very long heading that should be truncated for display purposes";
         let content = format!("# {}\nContent\n", long_heading);
         let doc = create_test_doc(&content);
 
@@ -280,7 +283,7 @@ mod tests {
              More\n\
              ## H2b\n\
              ### H3b\n\
-             Final\n"
+             Final\n",
         );
 
         // Collapse H2a (line 1)

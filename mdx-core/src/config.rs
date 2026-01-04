@@ -261,8 +261,7 @@ impl Config {
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
         let config: Config = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse config file: {}", path.display()))
-            ?;
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
 
         #[cfg(feature = "images")]
         {
@@ -280,8 +279,7 @@ impl Config {
     /// Write the default configuration to the default config file path
     /// Returns an error if the file already exists or cannot be written
     pub fn write_default() -> Result<PathBuf> {
-        let config_path = Self::config_path()
-            .context("Could not determine config file path")?;
+        let config_path = Self::config_path().context("Could not determine config file path")?;
 
         // Check if file already exists
         if config_path.exists() {
@@ -293,14 +291,15 @@ impl Config {
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
         // Serialize default config to TOML
         let config = Self::default();
-        let toml_string = toml::to_string_pretty(&config)
-            .context("Failed to serialize config to TOML")?;
+        let toml_string =
+            toml::to_string_pretty(&config).context("Failed to serialize config to TOML")?;
 
         // Write to file
         std::fs::write(&config_path, toml_string)
@@ -321,18 +320,18 @@ impl Config {
     /// Save configuration to the default config file path
     /// Overwrites the existing file if it exists
     pub fn save_to_file(config: &Self) -> Result<()> {
-        let config_path = Self::config_path()
-            .context("Could not determine config file path")?;
+        let config_path = Self::config_path().context("Could not determine config file path")?;
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
         // Serialize config to TOML
-        let toml_string = toml::to_string_pretty(config)
-            .context("Failed to serialize config to TOML")?;
+        let toml_string =
+            toml::to_string_pretty(config).context("Failed to serialize config to TOML")?;
 
         // Write to file
         std::fs::write(&config_path, toml_string)
@@ -401,7 +400,7 @@ width = 40\n\
 \n\
 [editor]\n\
 command = \"nvim\"\n\
-args = [\"+{line}\", \"{file}\"]\n"
+args = [\"+{line}\", \"{file}\"]\n",
         );
 
         if cfg!(feature = "watch") {
@@ -444,7 +443,7 @@ width = 32\n\
 \n\
 [editor]\n\
 command = \"$EDITOR\"\n\
-args = [\"+{line}\", \"{file}\"]\n"
+args = [\"+{line}\", \"{file}\"]\n",
         );
 
         if cfg!(feature = "watch") {

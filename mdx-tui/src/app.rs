@@ -1,8 +1,8 @@
 //! Application state
 
-use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
 use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
+use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
 
 /// Application mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,12 +273,13 @@ impl App {
         #[cfg(feature = "git")]
         if self.config.git.diff {
             let current_text: String = self.doc.rope.chunks().collect();
-            self.diff_worker.request_diff(crate::diff_worker::DiffRequest {
-                doc_id: 0,
-                path: self.doc.path.clone(),
-                rev: self.doc.rev,
-                current_text,
-            });
+            self.diff_worker
+                .request_diff(crate::diff_worker::DiffRequest {
+                    doc_id: 0,
+                    path: self.doc.path.clone(),
+                    rev: self.doc.rev,
+                    current_text,
+                });
         }
 
         Ok(())
@@ -316,10 +317,13 @@ impl App {
             );
 
             // Check if cursor is inside a collapsed range (but not at the start)
-            if let Some(range) = crate::collapse::find_range_containing_line(&collapsed_ranges, cursor) {
+            if let Some(range) =
+                crate::collapse::find_range_containing_line(&collapsed_ranges, cursor)
+            {
                 if moving_down {
                     // When moving down, jump to the line after the collapsed block
-                    pane.view.cursor_line = (range.end + 1).min(self.doc.line_count().saturating_sub(1));
+                    pane.view.cursor_line =
+                        (range.end + 1).min(self.doc.line_count().saturating_sub(1));
                 } else {
                     // When moving up, jump to the heading line
                     pane.view.cursor_line = range.start;
@@ -344,7 +348,8 @@ impl App {
                 );
 
                 // Find any collapsed range containing the target
-                let containing_range = collapsed_ranges.iter()
+                let containing_range = collapsed_ranges
+                    .iter()
                     .find(|r| r.contains_line(target_line) || r.start == target_line);
 
                 if let Some(range) = containing_range {
@@ -363,7 +368,12 @@ impl App {
 
     /// Calculate how many source lines to move for a given visual line count
     /// This accounts for line wrapping by estimating wrapped lines
-    fn calculate_source_lines_for_visual_lines(&self, visual_lines: usize, viewport_width: usize, forward: bool) -> usize {
+    fn calculate_source_lines_for_visual_lines(
+        &self,
+        visual_lines: usize,
+        viewport_width: usize,
+        forward: bool,
+    ) -> usize {
         if let Some(pane) = self.panes.focused_pane() {
             let start_line = if forward {
                 pane.view.cursor_line
@@ -422,14 +432,16 @@ impl App {
     /// Scroll down by half viewport height (accounting for wrapping)
     pub fn scroll_half_page_down(&mut self, viewport_height: usize, viewport_width: usize) {
         let half_page = viewport_height / 2;
-        let source_lines = self.calculate_source_lines_for_visual_lines(half_page, viewport_width, true);
+        let source_lines =
+            self.calculate_source_lines_for_visual_lines(half_page, viewport_width, true);
         self.move_cursor_down(source_lines);
     }
 
     /// Scroll up by half viewport height (accounting for wrapping)
     pub fn scroll_half_page_up(&mut self, viewport_height: usize, viewport_width: usize) {
         let half_page = viewport_height / 2;
-        let source_lines = self.calculate_source_lines_for_visual_lines(half_page, viewport_width, false);
+        let source_lines =
+            self.calculate_source_lines_for_visual_lines(half_page, viewport_width, false);
         self.move_cursor_up(source_lines);
     }
 
@@ -486,6 +498,52 @@ impl App {
         self.toc_auto_scroll(toc_height);
     }
 
+    /// Move TOC selection down by half page
+    pub fn toc_scroll_half_page_down(&mut self, toc_height: usize) {
+        if !self.doc.headings.is_empty() {
+            let jump = (toc_height / 2).max(1);
+            self.toc_selected = (self.toc_selected + jump).min(self.doc.headings.len() - 1);
+            self.toc_auto_scroll(toc_height);
+        }
+    }
+
+    /// Move TOC selection up by half page
+    pub fn toc_scroll_half_page_up(&mut self, toc_height: usize) {
+        let jump = (toc_height / 2).max(1);
+        self.toc_selected = self.toc_selected.saturating_sub(jump);
+        self.toc_auto_scroll(toc_height);
+    }
+
+    /// Move TOC selection down by full page
+    pub fn toc_scroll_full_page_down(&mut self, toc_height: usize) {
+        if !self.doc.headings.is_empty() {
+            let jump = toc_height.max(1);
+            self.toc_selected = (self.toc_selected + jump).min(self.doc.headings.len() - 1);
+            self.toc_auto_scroll(toc_height);
+        }
+    }
+
+    /// Move TOC selection up by full page
+    pub fn toc_scroll_full_page_up(&mut self, toc_height: usize) {
+        let jump = toc_height.max(1);
+        self.toc_selected = self.toc_selected.saturating_sub(jump);
+        self.toc_auto_scroll(toc_height);
+    }
+
+    /// Jump to top of TOC
+    pub fn toc_jump_to_top(&mut self, toc_height: usize) {
+        self.toc_selected = 0;
+        self.toc_auto_scroll(toc_height);
+    }
+
+    /// Jump to bottom of TOC
+    pub fn toc_jump_to_bottom(&mut self, toc_height: usize) {
+        if !self.doc.headings.is_empty() {
+            self.toc_selected = self.doc.headings.len() - 1;
+            self.toc_auto_scroll(toc_height);
+        }
+    }
+
     /// Auto-scroll TOC to keep selection visible
     pub fn toc_auto_scroll(&mut self, toc_height: usize) {
         let selected = self.toc_selected;
@@ -527,7 +585,8 @@ impl App {
     /// Move TOC dialog selection down
     pub fn toc_dialog_move_down(&mut self, dialog_height: usize) {
         if !self.doc.headings.is_empty() {
-            self.toc_dialog_selected = (self.toc_dialog_selected + 1).min(self.doc.headings.len() - 1);
+            self.toc_dialog_selected =
+                (self.toc_dialog_selected + 1).min(self.doc.headings.len() - 1);
             self.toc_dialog_auto_scroll(dialog_height);
         }
     }
@@ -536,6 +595,54 @@ impl App {
     pub fn toc_dialog_move_up(&mut self, dialog_height: usize) {
         self.toc_dialog_selected = self.toc_dialog_selected.saturating_sub(1);
         self.toc_dialog_auto_scroll(dialog_height);
+    }
+
+    /// Move TOC dialog selection down by half page
+    pub fn toc_dialog_scroll_half_page_down(&mut self, dialog_height: usize) {
+        if !self.doc.headings.is_empty() {
+            let jump = (dialog_height / 2).max(1);
+            self.toc_dialog_selected =
+                (self.toc_dialog_selected + jump).min(self.doc.headings.len() - 1);
+            self.toc_dialog_auto_scroll(dialog_height);
+        }
+    }
+
+    /// Move TOC dialog selection up by half page
+    pub fn toc_dialog_scroll_half_page_up(&mut self, dialog_height: usize) {
+        let jump = (dialog_height / 2).max(1);
+        self.toc_dialog_selected = self.toc_dialog_selected.saturating_sub(jump);
+        self.toc_dialog_auto_scroll(dialog_height);
+    }
+
+    /// Move TOC dialog selection down by full page
+    pub fn toc_dialog_scroll_full_page_down(&mut self, dialog_height: usize) {
+        if !self.doc.headings.is_empty() {
+            let jump = dialog_height.max(1);
+            self.toc_dialog_selected =
+                (self.toc_dialog_selected + jump).min(self.doc.headings.len() - 1);
+            self.toc_dialog_auto_scroll(dialog_height);
+        }
+    }
+
+    /// Move TOC dialog selection up by full page
+    pub fn toc_dialog_scroll_full_page_up(&mut self, dialog_height: usize) {
+        let jump = dialog_height.max(1);
+        self.toc_dialog_selected = self.toc_dialog_selected.saturating_sub(jump);
+        self.toc_dialog_auto_scroll(dialog_height);
+    }
+
+    /// Jump to top of TOC dialog
+    pub fn toc_dialog_jump_to_top(&mut self, dialog_height: usize) {
+        self.toc_dialog_selected = 0;
+        self.toc_dialog_auto_scroll(dialog_height);
+    }
+
+    /// Jump to bottom of TOC dialog
+    pub fn toc_dialog_jump_to_bottom(&mut self, dialog_height: usize) {
+        if !self.doc.headings.is_empty() {
+            self.toc_dialog_selected = self.doc.headings.len() - 1;
+            self.toc_dialog_auto_scroll(dialog_height);
+        }
     }
 
     /// Auto-scroll TOC dialog to keep selection visible
@@ -602,7 +709,10 @@ impl App {
         let cursor_line = pane.view.cursor_line;
 
         // Find the current heading
-        let current_idx = self.doc.headings.iter()
+        let current_idx = self
+            .doc
+            .headings
+            .iter()
             .enumerate()
             .rev()
             .find(|(_, h)| h.line <= cursor_line)
@@ -648,9 +758,24 @@ impl App {
         }
 
         // Check if there are any changes in the diff gutter
-        let has_added = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::Added));
-        let has_modified = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::Modified));
-        let has_deleted = self.doc.diff_gutter.marks.iter().any(|m| matches!(m, mdx_core::diff::DiffMark::DeletedAfter(_)));
+        let has_added = self
+            .doc
+            .diff_gutter
+            .marks
+            .iter()
+            .any(|m| matches!(m, mdx_core::diff::DiffMark::Added));
+        let has_modified = self
+            .doc
+            .diff_gutter
+            .marks
+            .iter()
+            .any(|m| matches!(m, mdx_core::diff::DiffMark::Modified));
+        let has_deleted = self
+            .doc
+            .diff_gutter
+            .marks
+            .iter()
+            .any(|m| matches!(m, mdx_core::diff::DiffMark::DeletedAfter(_)));
 
         // Priority: new > modified > deleted
         if has_added && !has_modified && !has_deleted {
@@ -702,22 +827,29 @@ impl App {
     pub fn yank_selection(&self) -> anyhow::Result<usize> {
         use arboard::Clipboard;
 
-        let pane = self.panes.focused_pane().ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
+        let pane = self
+            .panes
+            .focused_pane()
+            .ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
 
         if pane.view.mode != Mode::VisualLine {
             return Err(anyhow::anyhow!("Not in visual line mode"));
         }
 
-        let selection = pane.view.selection.as_ref()
+        let selection = pane
+            .view
+            .selection
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No selection"))?;
 
         let (start, end) = selection.range();
         let text = self.doc.get_lines(start, end);
         let line_count = end - start + 1;
 
-        let mut clipboard = Clipboard::new()
-            .map_err(|e| anyhow::anyhow!("Failed to access clipboard: {}", e))?;
-        clipboard.set_text(text)
+        let mut clipboard =
+            Clipboard::new().map_err(|e| anyhow::anyhow!("Failed to access clipboard: {}", e))?;
+        clipboard
+            .set_text(text)
             .map_err(|e| anyhow::anyhow!("Failed to set clipboard: {}", e))?;
 
         Ok(line_count)
@@ -741,7 +873,9 @@ impl App {
             anyhow::bail!("External commands are disabled (security.safe_mode = true)");
         }
 
-        let pane = self.panes.focused_pane()
+        let pane = self
+            .panes
+            .focused_pane()
             .ok_or_else(|| anyhow::anyhow!("No focused pane"))?;
 
         // Get current line (1-indexed for editors)
@@ -865,7 +999,9 @@ impl App {
     /// Find the nearest heading at or above the cursor position
     fn find_nearest_heading_above(&self, cursor_line: usize) -> Option<usize> {
         // Find the last heading that is at or before the cursor line
-        self.doc.headings.iter()
+        self.doc
+            .headings
+            .iter()
             .rev()
             .find(|h| h.line <= cursor_line)
             .map(|h| h.line)
@@ -1361,7 +1497,10 @@ mod tests {
         let mut app = App::new(config, doc, vec![]);
 
         app.enter_visual_line_mode();
-        assert_eq!(app.panes.focused_pane().unwrap().view.mode, Mode::VisualLine);
+        assert_eq!(
+            app.panes.focused_pane().unwrap().view.mode,
+            Mode::VisualLine
+        );
 
         app.exit_visual_line_mode();
         let pane = app.panes.focused_pane().unwrap();

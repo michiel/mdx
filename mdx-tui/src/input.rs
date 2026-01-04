@@ -16,7 +16,12 @@ pub enum Action {
 }
 
 /// Handle a key event with viewport dimensions for scroll commands
-pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewport_width: usize) -> Result<Action> {
+pub fn handle_input(
+    app: &mut App,
+    key: KeyEvent,
+    viewport_height: usize,
+    viewport_width: usize,
+) -> Result<Action> {
     // Clear status message on any keystroke (except pure modifiers)
     // This ensures messages don't persist indefinitely
     if !matches!(key.code, KeyCode::Modifier(_)) {
@@ -111,8 +116,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         match key {
             // Esc or Shift+O - close dialog without changes
             KeyEvent {
-                code: KeyCode::Esc,
-                ..
+                code: KeyCode::Esc, ..
             }
             | KeyEvent {
                 code: KeyCode::Char('O'),
@@ -312,6 +316,91 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
                 ..
             } => {
                 app.toc_dialog_move_up(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // Ctrl+d - half page down in TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                app.toc_dialog_scroll_half_page_down(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // Ctrl+u - half page up in TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('u'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                app.toc_dialog_scroll_half_page_up(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // g - jump to top of TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_dialog_jump_to_top(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // G - jump to bottom of TOC dialog
+            KeyEvent {
+                code: KeyCode::Char('G'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.toc_dialog_jump_to_bottom(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // PageDown - full page down in TOC dialog
+            KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            } => {
+                app.toc_dialog_scroll_full_page_down(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // PageUp - full page up in TOC dialog
+            KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            } => {
+                app.toc_dialog_scroll_full_page_up(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // Space - full page down in TOC dialog
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_dialog_scroll_full_page_down(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // Home - jump to top of TOC dialog
+            KeyEvent {
+                code: KeyCode::Home,
+                ..
+            } => {
+                app.toc_dialog_jump_to_top(dialog_height);
+                return Ok(Action::Continue);
+            }
+
+            // End - jump to bottom of TOC dialog
+            KeyEvent {
+                code: KeyCode::End, ..
+            } => {
+                app.toc_dialog_jump_to_bottom(dialog_height);
                 return Ok(Action::Continue);
             }
 
@@ -663,8 +752,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
 
                 // Esc - cancel search and exit search mode
                 KeyEvent {
-                    code: KeyCode::Esc,
-                    ..
+                    code: KeyCode::Esc, ..
                 } => {
                     app.clear_search();
                     app.exit_search_mode();
@@ -721,6 +809,46 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
                 return Ok(Action::Continue);
             }
 
+            // Ctrl+d - half page down in TOC
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                app.toc_scroll_half_page_down(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // Ctrl+u - half page up in TOC
+            KeyEvent {
+                code: KeyCode::Char('u'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                app.toc_scroll_half_page_up(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // g - jump to top of TOC
+            KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_jump_to_top(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // G - jump to bottom of TOC
+            KeyEvent {
+                code: KeyCode::Char('G'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                app.toc_jump_to_bottom(toc_height);
+                return Ok(Action::Continue);
+            }
+
             // Enter or l - jump to selected heading
             KeyEvent {
                 code: KeyCode::Enter,
@@ -768,6 +896,51 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
                 return Ok(Action::Continue);
             }
 
+            // PageDown - full page down in TOC
+            KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            } => {
+                app.toc_scroll_full_page_down(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // PageUp - full page up in TOC
+            KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            } => {
+                app.toc_scroll_full_page_up(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // Space - full page down in TOC
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                app.toc_scroll_full_page_down(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // Home - jump to top of TOC
+            KeyEvent {
+                code: KeyCode::Home,
+                ..
+            } => {
+                app.toc_jump_to_top(toc_height);
+                return Ok(Action::Continue);
+            }
+
+            // End - jump to bottom of TOC
+            KeyEvent {
+                code: KeyCode::End, ..
+            } => {
+                app.toc_jump_to_bottom(toc_height);
+                return Ok(Action::Continue);
+            }
+
             _ => {}
         }
     }
@@ -786,7 +959,13 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
     }
 
     // Esc - exit visual line mode
-    if matches!(key, KeyEvent { code: KeyCode::Esc, .. }) {
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Esc,
+            ..
+        }
+    ) {
         app.exit_visual_line_mode();
         return Ok(Action::Continue);
     }
@@ -1194,8 +1373,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent, viewport_height: usize, viewpo
         }
 
         KeyEvent {
-            code: KeyCode::End,
-            ..
+            code: KeyCode::End, ..
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
             app.jump_to_line(last_line);
@@ -1224,7 +1402,9 @@ pub fn handle_mouse(
     viewport_height: usize,
     _viewport_width: usize,
 ) -> Result<()> {
-    let MouseEvent { kind, column, row, .. } = mouse;
+    let MouseEvent {
+        kind, column, row, ..
+    } = mouse;
 
     // Get terminal size to compute layout
     // We need to account for the status bar at the bottom
@@ -1275,9 +1455,9 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         let chunks = Layout::default()
             .direction(LayoutDir::Vertical)
             .constraints([
-                Constraint::Min(1),      // Main content area (TOC + panes)
-                Constraint::Length(4),   // Security warnings pane
-                Constraint::Length(1),   // Status bar
+                Constraint::Min(1),    // Main content area (TOC + panes)
+                Constraint::Length(4), // Security warnings pane
+                Constraint::Length(1), // Status bar
             ])
             .split(Rect::new(0, 0, term_width, term_height));
 
@@ -1286,8 +1466,8 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         let chunks = Layout::default()
             .direction(LayoutDir::Vertical)
             .constraints([
-                Constraint::Min(1),      // Main content area
-                Constraint::Length(1),   // Status bar
+                Constraint::Min(1),    // Main content area
+                Constraint::Length(1), // Status bar
             ])
             .split(Rect::new(0, 0, term_width, term_height));
 
@@ -1300,18 +1480,12 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         let chunks = if app.config.toc.side == mdx_core::config::TocSide::Left {
             Layout::default()
                 .direction(LayoutDir::Horizontal)
-                .constraints([
-                    Constraint::Length(toc_width),
-                    Constraint::Min(1),
-                ])
+                .constraints([Constraint::Length(toc_width), Constraint::Min(1)])
                 .split(base_chunks[0])
         } else {
             Layout::default()
                 .direction(LayoutDir::Horizontal)
-                .constraints([
-                    Constraint::Min(1),
-                    Constraint::Length(toc_width),
-                ])
+                .constraints([Constraint::Min(1), Constraint::Length(toc_width)])
                 .split(base_chunks[0])
         };
 
@@ -1468,11 +1642,7 @@ fn handle_mouse_down(
         }
         HitTarget::SplitBorder { path, .. } => {
             // Start resize: find the boundary to get current ratio
-            if let Some(boundary) = layout
-                .split_boundaries
-                .iter()
-                .find(|b| b.path == path)
-            {
+            if let Some(boundary) = layout.split_boundaries.iter().find(|b| b.path == path) {
                 app.mouse_state = MouseState::Resizing {
                     split_path: path,
                     start_ratio: boundary.current_ratio,
@@ -1499,7 +1669,10 @@ fn handle_mouse_drag(
     _viewport_height: usize,
 ) -> Result<()> {
     match &app.mouse_state.clone() {
-        MouseState::PendingSelection { pane_id, anchor_line } => {
+        MouseState::PendingSelection {
+            pane_id,
+            anchor_line,
+        } => {
             let pane_id = *pane_id;
             let anchor_line = *anchor_line;
 
@@ -1529,7 +1702,10 @@ fn handle_mouse_drag(
                 }
             }
         }
-        MouseState::Selecting { pane_id, anchor_line } => {
+        MouseState::Selecting {
+            pane_id,
+            anchor_line,
+        } => {
             let pane_id = *pane_id;
             let anchor_line = *anchor_line;
 
@@ -1563,9 +1739,17 @@ fn handle_mouse_drag(
                 }
             }
         }
-        MouseState::Resizing { split_path, start_ratio, start_pos } => {
+        MouseState::Resizing {
+            split_path,
+            start_ratio,
+            start_pos,
+        } => {
             // Find the boundary being resized
-            if let Some(boundary) = layout.split_boundaries.iter().find(|b| b.path == *split_path) {
+            if let Some(boundary) = layout
+                .split_boundaries
+                .iter()
+                .find(|b| b.path == *split_path)
+            {
                 // Compute new ratio based on mouse movement
                 let new_ratio = match boundary.dir {
                     crate::panes::SplitDir::Vertical => {
@@ -1657,7 +1841,8 @@ fn handle_scroll(
                 // Apply scroll delta
                 if delta > 0 {
                     // Scroll down
-                    pane.view.scroll_line = (pane.view.scroll_line + delta as usize).min(max_scroll);
+                    pane.view.scroll_line =
+                        (pane.view.scroll_line + delta as usize).min(max_scroll);
                 } else {
                     // Scroll up
                     pane.view.scroll_line = pane.view.scroll_line.saturating_sub((-delta) as usize);

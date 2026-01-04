@@ -26,7 +26,11 @@ pub struct SecurityEvent {
 
 impl SecurityEvent {
     /// Create a new security event
-    pub fn new(level: SecurityEventLevel, message: impl Into<String>, source: impl Into<String>) -> Self {
+    pub fn new(
+        level: SecurityEventLevel,
+        message: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Self {
             level,
             message: message.into(),

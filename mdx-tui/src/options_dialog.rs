@@ -1,6 +1,6 @@
 //! Options dialog for configuration management
 
-use mdx_core::{Config, config::ThemeVariant};
+use mdx_core::{config::ThemeVariant, Config};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogButton {
@@ -139,7 +139,8 @@ impl OptionsDialog {
                 self.editing_config.security.no_exec = !self.editing_config.security.no_exec;
             }
             OptionField::Utf8Graphics => {
-                self.editing_config.render.use_utf8_graphics = !self.editing_config.render.use_utf8_graphics;
+                self.editing_config.render.use_utf8_graphics =
+                    !self.editing_config.render.use_utf8_graphics;
             }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => {
@@ -168,7 +169,9 @@ impl OptionsDialog {
             OptionField::TocWidth => format!("{}", self.editing_config.toc.width),
             OptionField::SafeMode => format!("{}", self.editing_config.security.safe_mode),
             OptionField::NoExec => format!("{}", self.editing_config.security.no_exec),
-            OptionField::Utf8Graphics => format!("{}", self.editing_config.render.use_utf8_graphics),
+            OptionField::Utf8Graphics => {
+                format!("{}", self.editing_config.render.use_utf8_graphics)
+            }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => format!("{}", self.editing_config.watch.enabled),
             #[cfg(feature = "watch")]

@@ -218,7 +218,10 @@ mod tests {
             writeln!(file, "Absolutely final change")?;
             file.flush()?;
             thread::sleep(Duration::from_millis(500));
-            assert!(watcher.check_changed(250), "Watcher should eventually detect changes");
+            assert!(
+                watcher.check_changed(250),
+                "Watcher should eventually detect changes"
+            );
         }
 
         // Second call should return false (events consumed)

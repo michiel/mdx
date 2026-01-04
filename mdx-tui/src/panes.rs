@@ -67,13 +67,13 @@ pub type PaneId = usize;
 /// Information about a split boundary for mouse interaction
 #[derive(Debug, Clone)]
 pub struct SplitBoundary {
-    pub path: Vec<usize>,    // Path to the split node (0=left/top, 1=right/bottom at each level)
-    pub dir: SplitDir,        // Direction of this split
-    pub position: u16,        // X coordinate for vertical split, Y for horizontal
-    pub start: u16,           // Starting coordinate (Y for vertical, X for horizontal)
-    pub end: u16,             // Ending coordinate (Y for vertical, X for horizontal)
-    pub current_ratio: f32,   // Current ratio of this split
-    pub area: Rect,           // Area covered by this split
+    pub path: Vec<usize>, // Path to the split node (0=left/top, 1=right/bottom at each level)
+    pub dir: SplitDir,    // Direction of this split
+    pub position: u16,    // X coordinate for vertical split, Y for horizontal
+    pub start: u16,       // Starting coordinate (Y for vertical, X for horizontal)
+    pub end: u16,         // Ending coordinate (Y for vertical, X for horizontal)
+    pub current_ratio: f32, // Current ratio of this split
+    pub area: Rect,       // Area covered by this split
 }
 
 /// Direction of a split
@@ -116,9 +116,9 @@ impl PaneNode {
         match self {
             PaneNode::Leaf(id) if *id == target_id => Some(self),
             PaneNode::Leaf(_) => None,
-            PaneNode::Split { left, right, .. } => {
-                left.find_leaf(target_id).or_else(|| right.find_leaf(target_id))
-            }
+            PaneNode::Split { left, right, .. } => left
+                .find_leaf(target_id)
+                .or_else(|| right.find_leaf(target_id)),
         }
     }
 
@@ -248,7 +248,12 @@ impl PaneManager {
             PaneNode::Leaf(id) => {
                 rects.insert(*id, area);
             }
-            PaneNode::Split { dir, left, right, ratio } => {
+            PaneNode::Split {
+                dir,
+                left,
+                right,
+                ratio,
+            } => {
                 let (left_rect, right_rect) = match dir {
                     SplitDir::Horizontal => {
                         // Split top/bottom
@@ -309,7 +314,12 @@ impl PaneManager {
             PaneNode::Leaf(_) => {
                 // No boundaries in a leaf
             }
-            PaneNode::Split { dir, left, right, ratio } => {
+            PaneNode::Split {
+                dir,
+                left,
+                right,
+                ratio,
+            } => {
                 // Record this split boundary
                 let (position, start, end) = match dir {
                     SplitDir::Horizontal => {
@@ -341,8 +351,18 @@ impl PaneManager {
                         let top_height = split_y.saturating_sub(area.y);
                         let bottom_height = area.height.saturating_sub(top_height);
                         (
-                            Rect { x: area.x, y: area.y, width: area.width, height: top_height },
-                            Rect { x: area.x, y: split_y, width: area.width, height: bottom_height },
+                            Rect {
+                                x: area.x,
+                                y: area.y,
+                                width: area.width,
+                                height: top_height,
+                            },
+                            Rect {
+                                x: area.x,
+                                y: split_y,
+                                width: area.width,
+                                height: bottom_height,
+                            },
                         )
                     }
                     SplitDir::Vertical => {
@@ -350,8 +370,18 @@ impl PaneManager {
                         let left_width = split_x.saturating_sub(area.x);
                         let right_width = area.width.saturating_sub(left_width);
                         (
-                            Rect { x: area.x, y: area.y, width: left_width, height: area.height },
-                            Rect { x: split_x, y: area.y, width: right_width, height: area.height },
+                            Rect {
+                                x: area.x,
+                                y: area.y,
+                                width: left_width,
+                                height: area.height,
+                            },
+                            Rect {
+                                x: split_x,
+                                y: area.y,
+                                width: right_width,
+                                height: area.height,
+                            },
                         )
                     }
                 };
@@ -375,11 +405,7 @@ impl PaneManager {
         Self::update_split_ratio_recursive(&mut self.root, path, clamped_ratio)
     }
 
-    fn update_split_ratio_recursive(
-        node: &mut PaneNode,
-        path: &[usize],
-        new_ratio: f32,
-    ) -> bool {
+    fn update_split_ratio_recursive(node: &mut PaneNode, path: &[usize], new_ratio: f32) -> bool {
         if path.is_empty() {
             // We've reached the target split
             if let PaneNode::Split { ratio, .. } = node {
@@ -453,7 +479,12 @@ impl PaneManager {
                 node
             }
             PaneNode::Leaf(_) => node,
-            PaneNode::Split { dir, left, right, ratio } => {
+            PaneNode::Split {
+                dir,
+                left,
+                right,
+                ratio,
+            } => {
                 // Check if target is in left or right subtree
                 let left_ids = left.leaf_ids();
                 let right_ids = right.leaf_ids();

@@ -59,14 +59,18 @@ pub fn diff_gutter_from_text(base: &str, current: &str) -> DiffGutter {
                             let mark_idx = current_line_idx - 1;
                             if mark_idx < marks.len() {
                                 marks[mark_idx] = match marks[mark_idx] {
-                                    DiffMark::DeletedAfter(n) => DiffMark::DeletedAfter(n + delete_count),
+                                    DiffMark::DeletedAfter(n) => {
+                                        DiffMark::DeletedAfter(n + delete_count)
+                                    }
                                     _ => DiffMark::DeletedAfter(delete_count),
                                 };
                             }
                         } else if !marks.is_empty() {
                             // Deletion at start of file
                             marks[0] = match marks[0] {
-                                DiffMark::DeletedAfter(n) => DiffMark::DeletedAfter(n + delete_count),
+                                DiffMark::DeletedAfter(n) => {
+                                    DiffMark::DeletedAfter(n + delete_count)
+                                }
                                 _ => DiffMark::DeletedAfter(delete_count),
                             };
                         }
@@ -196,4 +200,3 @@ mod tests {
         assert_eq!(gutter.get(2), DiffMark::Added);
     }
 }
-

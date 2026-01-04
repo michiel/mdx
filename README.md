@@ -103,6 +103,14 @@ mdx README.md
 mdx docs/guide.md
 ```
 
+Read from stdin:
+
+```bash
+cat README.md | mdx
+echo "# Hello World" | mdx
+curl https://example.com/doc.md | mdx
+```
+
 ### Quick Start
 
 - Press `j`/`k` to scroll line by line

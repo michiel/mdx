@@ -134,7 +134,6 @@ pub fn read_head_file_text(_repo: &gix::Repository, _rel_path: &Path) -> Result<
     Ok(None)
 }
 
-
 /// Get base text from git HEAD using gix
 #[cfg(feature = "git")]
 pub fn get_base_text_gix(file_path: &Path) -> Result<Option<String>> {
@@ -147,4 +146,3 @@ pub fn get_base_text_gix(file_path: &Path) -> Result<Option<String>> {
     // Read file from HEAD
     read_head_file_text(&repo_ctx.repo, &repo_ctx.rel_path)
 }
-

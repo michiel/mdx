@@ -4,8 +4,8 @@
 //! including document loading, navigation, search, and pane management.
 
 use mdx_core::{Config, Document};
-use mdx_tui::App;
 use mdx_tui::ui;
+use mdx_tui::App;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::io::Write as _;

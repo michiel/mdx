@@ -69,7 +69,7 @@ impl Theme {
                     .add_modifier(Modifier::BOLD),
             ],
             code: Style::default().fg(Color::Rgb(229, 192, 123)), // Warm amber
-            code_block_bg: Color::Rgb(40, 44, 52), // Dark background for code blocks
+            code_block_bg: Color::Rgb(40, 44, 52),                // Dark background for code blocks
             link: Style::default()
                 .fg(Color::Rgb(97, 175, 239)) // Bright blue
                 .add_modifier(Modifier::UNDERLINED),
@@ -77,8 +77,8 @@ impl Theme {
                 .fg(Color::Rgb(130, 140, 150)) // Readable gray
                 .add_modifier(Modifier::ITALIC),
             list_marker: Style::default().fg(Color::Rgb(224, 108, 117)), // Soft red
-            toc_bg: Color::Rgb(30, 30, 30), // Subtle dark background
-            toc_border: Color::Rgb(60, 60, 60), // Visible border
+            toc_bg: Color::Rgb(30, 30, 30),                              // Subtle dark background
+            toc_border: Color::Rgb(60, 60, 60),                          // Visible border
             toc_active: Style::default()
                 .fg(Color::Rgb(30, 30, 30))
                 .bg(Color::Rgb(86, 182, 194)) // Cyan highlight
@@ -128,7 +128,7 @@ impl Theme {
                     .add_modifier(Modifier::BOLD),
             ],
             code: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red-brown
-            code_block_bg: Color::Rgb(246, 248, 250), // Very light gray background
+            code_block_bg: Color::Rgb(246, 248, 250),           // Very light gray background
             link: Style::default()
                 .fg(Color::Rgb(3, 102, 214)) // Deep blue
                 .add_modifier(Modifier::UNDERLINED),

@@ -41,12 +41,7 @@ pub fn expand_template(template: &str, file_path: &Path, line: usize) -> String 
 }
 
 /// Launch an external editor with the given file and line
-pub fn launch_editor(
-    command: &str,
-    args: &[String],
-    file_path: &Path,
-    line: usize,
-) -> Result<()> {
+pub fn launch_editor(command: &str, args: &[String], file_path: &Path, line: usize) -> Result<()> {
     // Suspend the terminal (will be done by caller)
     // The caller should call terminal::restore() before this and terminal::init() after
 

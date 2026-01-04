@@ -21,9 +21,9 @@ struct Cli {
 
 #[derive(Parser, Debug)]
 struct ViewArgs {
-    /// Path to markdown file
+    /// Path to markdown file (reads from stdin if not provided)
     #[arg(value_name = "FILE")]
-    file: PathBuf,
+    file: Option<PathBuf>,
 
     /// Disable security restrictions (use for trusted content only)
     #[arg(long)]
@@ -43,18 +43,19 @@ fn main() -> Result<()> {
     if let Some(command) = cli.command {
         match command {
             Commands::InitConfig => {
-                let config_path = Config::write_default()
-                    .context("Failed to initialize config file")?;
+                let config_path =
+                    Config::write_default().context("Failed to initialize config file")?;
                 println!("Created default config file at: {}", config_path.display());
                 return Ok(());
             }
         }
     }
 
-    // Default behavior: open markdown file
-    let view_args = cli.view.ok_or_else(|| {
-        anyhow::anyhow!("No file specified. Use 'mdx <FILE>' to view a file or 'mdx init-config' to initialize configuration.")
-    })?;
+    // Default behavior: open markdown file or read from stdin
+    let view_args = cli.view.unwrap_or(ViewArgs {
+        file: None,
+        insecure: false,
+    });
 
     // Load configuration
     let (mut config, mut warnings) = Config::load().context("Failed to load configuration")?;
@@ -67,9 +68,13 @@ fn main() -> Result<()> {
         warnings.clear();
     }
 
-    // Load document
-    let (doc, doc_warnings) = Document::load(&view_args.file)
-        .with_context(|| format!("Failed to load document: {}", view_args.file.display()))?;
+    // Load document from file or stdin
+    let (doc, doc_warnings) = if let Some(file_path) = view_args.file {
+        Document::load(&file_path)
+            .with_context(|| format!("Failed to load document: {}", file_path.display()))?
+    } else {
+        Document::from_stdin().context("Failed to read document from stdin")?
+    };
 
     // Combine warnings from config and document
     warnings.extend(doc_warnings);

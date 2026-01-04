@@ -109,11 +109,7 @@ mod tests {
 
     #[test]
     fn test_image_node_creation() {
-        let img = ImageNode::new(
-            "test.png".to_string(),
-            "Test image".to_string(),
-            10,
-        );
+        let img = ImageNode::new("test.png".to_string(), "Test image".to_string(), 10);
         assert_eq!(img.src, "test.png");
         assert_eq!(img.alt, "Test image");
         assert_eq!(img.title, None);

@@ -17,9 +17,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(1),      // Main content area (TOC + panes)
-                Constraint::Length(4),   // Security warnings pane
-                Constraint::Length(1),   // Status bar
+                Constraint::Min(1),    // Main content area (TOC + panes)
+                Constraint::Length(4), // Security warnings pane
+                Constraint::Length(1), // Status bar
             ])
             .split(frame.area());
 
@@ -31,8 +31,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(1),      // Main content area
-                Constraint::Length(1),   // Status bar
+                Constraint::Min(1),    // Main content area
+                Constraint::Length(1), // Status bar
             ])
             .split(frame.area());
 
@@ -135,13 +135,15 @@ fn render_collapsed_summary(
     // Add collapse indicator (▶)
     spans.push(Span::styled(
         "▶ ",
-        Style::default().fg(theme.collapsed_indicator_fg)
+        Style::default().fg(theme.collapsed_indicator_fg),
     ));
 
     // Add heading marks based on level
     if let Some(level) = range.level {
         let marks = "#".repeat(level as usize);
-        let heading_style = theme.heading.get(level as usize - 1)
+        let heading_style = theme
+            .heading
+            .get(level as usize - 1)
             .copied()
             .unwrap_or(theme.base);
         spans.push(Span::styled(format!("{} ", marks), heading_style));
@@ -149,7 +151,9 @@ fn render_collapsed_summary(
 
     // Add heading text (truncated)
     let heading_style = if let Some(level) = range.level {
-        theme.heading.get(level as usize - 1)
+        theme
+            .heading
+            .get(level as usize - 1)
             .copied()
             .unwrap_or(theme.base)
     } else {
@@ -161,24 +165,23 @@ fn render_collapsed_summary(
     let count_text = format!(" ({} lines)", range.line_count);
     spans.push(Span::styled(
         count_text,
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::DarkGray),
     ));
 
     // Calculate current width and pad to content width
-    let current_width: usize = spans.iter()
-        .map(|s| s.content.chars().count())
-        .sum();
+    let current_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
 
     if current_width < content_width {
         let padding = " ".repeat(content_width - current_width);
         spans.push(Span::styled(
             padding,
-            Style::default().bg(theme.collapsed_block_bg)
+            Style::default().bg(theme.collapsed_block_bg),
         ));
     }
 
     // Apply background color to all spans
-    let spans: Vec<Span> = spans.into_iter()
+    let spans: Vec<Span> = spans
+        .into_iter()
         .map(|mut span| {
             if is_focused && is_cursor {
                 span.style = span.style.bg(theme.cursor_line_bg);
@@ -220,7 +223,7 @@ fn render_security_warnings(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-                .title(" Security Warnings (W to toggle) ")
+                .title(" Security Warnings (W to toggle) "),
         )
         .style(theme.base);
 
@@ -266,7 +269,17 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
     // If in raw mode, render plain text without markdown processing
     if pane.view.show_raw {
-        render_raw_text(frame, app, content_area, pane_id, scroll, cursor, is_focused, selection_range, line_count);
+        render_raw_text(
+            frame,
+            app,
+            content_area,
+            pane_id,
+            scroll,
+            cursor,
+            is_focused,
+            selection_range,
+            line_count,
+        );
         return;
     }
 
@@ -291,10 +304,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 // Opening fence - extract language and indentation
                 let indent = trimmed.len() - trimmed_start.len();
                 code_block_indent = indent;
-                let lang = trimmed_start
-                    .strip_prefix("```")
-                    .unwrap_or("")
-                    .trim();
+                let lang = trimmed_start.strip_prefix("```").unwrap_or("").trim();
                 code_block_lang = if lang.is_empty() {
                     "plain".to_string()
                 } else {
@@ -315,13 +325,14 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let left_margin_width = (line_num_width + 1 + gutter_width) as u16; // +1 for space after line number
 
     // Compute collapsed ranges for this pane
-    let collapsed_ranges = collapse::compute_all_collapsed_ranges(&pane.view.collapsed_headings, &app.doc);
+    let collapsed_ranges =
+        collapse::compute_all_collapsed_ranges(&pane.view.collapsed_headings, &app.doc);
 
     // Build only visible lines
     let mut styled_lines: Vec<Line> = Vec::new();
     let mut is_table_row_flags: Vec<bool> = Vec::new();
     let mut list_item_indents: Vec<Option<usize>> = Vec::new(); // Track list item continuation indent
-    // Account for borders (top and bottom borders take 2 lines)
+                                                                // Account for borders (top and bottom borders take 2 lines)
     let content_height = content_area.height.saturating_sub(2) as usize;
     let mut visible_end = (scroll + content_height).min(line_count);
     let mut is_first_code_line = false;
@@ -411,7 +422,10 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         #[cfg(feature = "images")]
         if !in_code_block && app.config.images.enabled && !app.config.security.safe_mode {
             // Check if there's an image on this line (clone to avoid borrow issues)
-            let image_opt = app.doc.images.iter()
+            let image_opt = app
+                .doc
+                .images
+                .iter()
                 .find(|img| img.source_line == line_idx)
                 .cloned();
 
@@ -522,20 +536,34 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 } else {
                     &line_text
                 };
-                line_spans.extend(render_code_line(code_content, &app.theme, search_query.as_deref()));
+                line_spans.extend(render_code_line(
+                    code_content,
+                    &app.theme,
+                    search_query.as_deref(),
+                ));
             } else {
-                line_spans.extend(render_code_line(&line_text, &app.theme, search_query.as_deref()));
+                line_spans.extend(render_code_line(
+                    &line_text,
+                    &app.theme,
+                    search_query.as_deref(),
+                ));
             }
             is_code_block_line = true;
         } else {
             // Apply markdown styling to the line
-            line_spans.extend(style_markdown_line(&line_text, &app.theme, &app.config.render, search_query.as_deref()));
+            line_spans.extend(style_markdown_line(
+                &line_text,
+                &app.theme,
+                &app.config.render,
+                search_query.as_deref(),
+            ));
             is_code_block_line = false;
         }
 
         // For code blocks, pad to full viewport width and add language label on first line
         if is_code_block_line {
-            let line_visual_width: usize = line_spans.iter()
+            let line_visual_width: usize = line_spans
+                .iter()
                 .map(|span| span.content.chars().count())
                 .sum();
             // Calculate available width (content_area width - borders)
@@ -552,21 +580,21 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                     let padding_before = " ".repeat(remaining_width - lang_width);
                     line_spans.push(Span::styled(
                         padding_before,
-                        Style::default().bg(app.theme.code_block_bg)
+                        Style::default().bg(app.theme.code_block_bg),
                     ));
                     // Add the language label
                     line_spans.push(Span::styled(
                         lang_label,
                         Style::default()
                             .fg(Color::Rgb(120, 120, 120))
-                            .bg(app.theme.code_block_bg)
+                            .bg(app.theme.code_block_bg),
                     ));
                 } else {
                     // Not enough space for label, just pad
                     let padding = " ".repeat(remaining_width);
                     line_spans.push(Span::styled(
                         padding,
-                        Style::default().bg(app.theme.code_block_bg)
+                        Style::default().bg(app.theme.code_block_bg),
                     ));
                 }
                 is_first_code_line = false;
@@ -575,7 +603,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 let padding = " ".repeat(available_width - line_visual_width);
                 line_spans.push(Span::styled(
                     padding,
-                    Style::default().bg(app.theme.code_block_bg)
+                    Style::default().bg(app.theme.code_block_bg),
                 ));
             }
         }
@@ -590,27 +618,36 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         // Apply highlighting directly to spans - priority order: selection > cursor > code block
         if is_focused && is_selected {
             // Visual line selection: apply cyan background to each span
-            line_spans = line_spans.into_iter().map(|mut span| {
-                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
-                span.style = new_style;
-                span
-            }).collect();
+            line_spans = line_spans
+                .into_iter()
+                .map(|mut span| {
+                    let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                    span.style = new_style;
+                    span
+                })
+                .collect();
         } else if is_focused && line_idx == cursor {
             // Cursor line: apply cursor background to each span
-            line_spans = line_spans.into_iter().map(|mut span| {
-                let new_style = span.style.bg(app.theme.cursor_line_bg);
-                span.style = new_style;
-                span
-            }).collect();
+            line_spans = line_spans
+                .into_iter()
+                .map(|mut span| {
+                    let new_style = span.style.bg(app.theme.cursor_line_bg);
+                    span.style = new_style;
+                    span
+                })
+                .collect();
         } else if is_code_block_line {
             // Code block: apply code block background to each span (if not already styled)
-            line_spans = line_spans.into_iter().map(|mut span| {
-                if span.style.bg.is_none() {
-                    let new_style = span.style.bg(app.theme.code_block_bg);
-                    span.style = new_style;
-                }
-                span
-            }).collect();
+            line_spans = line_spans
+                .into_iter()
+                .map(|mut span| {
+                    if span.style.bg.is_none() {
+                        let new_style = span.style.bg(app.theme.code_block_bg);
+                        span.style = new_style;
+                    }
+                    span
+                })
+                .collect();
         }
 
         let line = Line::from(line_spans);
@@ -739,10 +776,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
                     if remaining_len <= available {
                         // Entire remaining text fits
-                        current_line_spans.push(Span::styled(
-                            remaining.to_string(),
-                            span.style
-                        ));
+                        current_line_spans.push(Span::styled(remaining.to_string(), span.style));
                         current_width += remaining_len;
                         break;
                     } else {
@@ -768,7 +802,8 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                         // Prefer splitting at word boundary if we found one
                         let split_pos = if let Some(word_end) = last_word_end {
                             // Split at the word boundary, but skip the trailing whitespace
-                            let after_space = remaining[word_end..].char_indices()
+                            let after_space = remaining[word_end..]
+                                .char_indices()
                                 .skip_while(|(_, c)| c.is_whitespace())
                                 .next()
                                 .map(|(i, _)| word_end + i)
@@ -796,10 +831,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                         let rest = &rest[safe_split_pos.1 - safe_split_pos.0..];
 
                         if !chunk.is_empty() {
-                            current_line_spans.push(Span::styled(
-                                chunk.to_string(),
-                                span.style
-                            ));
+                            current_line_spans.push(Span::styled(chunk.to_string(), span.style));
                             wrapped_lines.push(Line::from(current_line_spans.clone()));
                             current_line_spans.clear();
 
@@ -825,7 +857,11 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     }
 
     let paragraph = Paragraph::new(wrapped_lines)
-        .block(Block::default().borders(Borders::ALL).border_style(border_style))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        )
         .style(app.theme.base);
 
     frame.render_widget(paragraph, content_area);
@@ -867,9 +903,14 @@ fn render_breadcrumb(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, 
 
         // Truncate crumb if needed
         let crumb_text = if current_width + crumb.len() > max_breadcrumb_width {
-            let available = max_breadcrumb_width.saturating_sub(current_width).saturating_sub(1);
+            let available = max_breadcrumb_width
+                .saturating_sub(current_width)
+                .saturating_sub(1);
             if available > 3 {
-                format!("{}…", &crumb.chars().take(available - 1).collect::<String>())
+                format!(
+                    "{}…",
+                    &crumb.chars().take(available - 1).collect::<String>()
+                )
             } else {
                 "…".to_string()
             }
@@ -903,7 +944,9 @@ fn render_breadcrumb(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, 
         };
 
         // Add spacing before status
-        let padding_width = area.width.saturating_sub(current_width as u16 + status_text.len() as u16 + 2);
+        let padding_width = area
+            .width
+            .saturating_sub(current_width as u16 + status_text.len() as u16 + 2);
         if padding_width > 0 {
             spans.push(Span::raw(" ".repeat(padding_width as usize)));
         }
@@ -984,10 +1027,7 @@ fn render_raw_text(
         line_spans.push(Span::raw("  "));
 
         // Add raw text content
-        line_spans.push(Span::styled(
-            line_text.to_string(),
-            app.theme.base,
-        ));
+        line_spans.push(Span::styled(line_text.to_string(), app.theme.base));
 
         // Check if this line is selected or cursor
         let is_selected = if let Some((start, end)) = selection_range {
@@ -999,18 +1039,24 @@ fn render_raw_text(
         // Apply highlighting directly to spans - priority order: selection > cursor
         if is_focused && is_selected {
             // Visual line selection: apply cyan background to each span
-            line_spans = line_spans.into_iter().map(|mut span| {
-                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
-                span.style = new_style;
-                span
-            }).collect();
+            line_spans = line_spans
+                .into_iter()
+                .map(|mut span| {
+                    let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                    span.style = new_style;
+                    span
+                })
+                .collect();
         } else if is_focused && line_idx == cursor {
             // Cursor line: apply cursor background to each span
-            line_spans = line_spans.into_iter().map(|mut span| {
-                let new_style = span.style.bg(app.theme.cursor_line_bg);
-                span.style = new_style;
-                span
-            }).collect();
+            line_spans = line_spans
+                .into_iter()
+                .map(|mut span| {
+                    let new_style = span.style.bg(app.theme.cursor_line_bg);
+                    span.style = new_style;
+                    span
+                })
+                .collect();
         }
 
         let line = Line::from(line_spans);
@@ -1025,31 +1071,79 @@ fn render_raw_text(
     };
 
     let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).border_style(border_style).title(" Raw "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Raw "),
+        )
         .style(app.theme.base);
 
     frame.render_widget(paragraph, area);
 }
 
 /// Render a code block line with syntax highlighting
-fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Option<&str>) -> Vec<Span<'static>> {
+fn render_code_line(
+    text: &str,
+    theme: &crate::theme::Theme,
+    search_query: Option<&str>,
+) -> Vec<Span<'static>> {
     // Code block background color from theme
     let code_bg = theme.code_block_bg;
 
     // Define syntax highlighting colors
     let keyword_color = Color::Rgb(198, 120, 221); // Purple for keywords
     let string_color = Color::Rgb(152, 195, 121); // Green for strings
-    let comment_color = Color::Rgb(92, 99, 112);  // Gray for comments
+    let comment_color = Color::Rgb(92, 99, 112); // Gray for comments
     let number_color = Color::Rgb(209, 154, 102); // Orange for numbers
     let function_color = Color::Rgb(97, 175, 239); // Blue for functions
 
     // Common keywords across languages
     let keywords = [
-        "fn", "func", "function", "def", "class", "struct", "enum", "impl", "trait",
-        "let", "const", "var", "mut", "pub", "priv", "private", "public", "protected",
-        "if", "else", "match", "switch", "case", "for", "while", "loop", "break", "continue",
-        "return", "yield", "async", "await", "import", "export", "from", "use",
-        "type", "interface", "extends", "implements", "new", "this", "self", "super",
+        "fn",
+        "func",
+        "function",
+        "def",
+        "class",
+        "struct",
+        "enum",
+        "impl",
+        "trait",
+        "let",
+        "const",
+        "var",
+        "mut",
+        "pub",
+        "priv",
+        "private",
+        "public",
+        "protected",
+        "if",
+        "else",
+        "match",
+        "switch",
+        "case",
+        "for",
+        "while",
+        "loop",
+        "break",
+        "continue",
+        "return",
+        "yield",
+        "async",
+        "await",
+        "import",
+        "export",
+        "from",
+        "use",
+        "type",
+        "interface",
+        "extends",
+        "implements",
+        "new",
+        "this",
+        "self",
+        "super",
     ];
 
     let mut spans = Vec::new();
@@ -1094,7 +1188,9 @@ fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Optio
         // Check for numbers
         if chars[i].is_ascii_digit() {
             let start = i;
-            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_') {
+            while i < chars.len()
+                && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_')
+            {
                 i += 1;
             }
             let number: String = chars[start..i].iter().collect();
@@ -1117,16 +1213,20 @@ fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Optio
             if keywords.contains(&word.as_str()) {
                 spans.push(Span::styled(
                     word,
-                    Style::default().fg(keyword_color).bg(code_bg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(keyword_color)
+                        .bg(code_bg)
+                        .add_modifier(Modifier::BOLD),
                 ));
             } else {
                 // Regular identifier - check if followed by '(' for function
                 let is_function = i < chars.len() && chars[i] == '(';
-                let color = if is_function { function_color } else { theme.code.fg.unwrap_or(Color::White) };
-                spans.push(Span::styled(
-                    word,
-                    Style::default().fg(color).bg(code_bg),
-                ));
+                let color = if is_function {
+                    function_color
+                } else {
+                    theme.code.fg.unwrap_or(Color::White)
+                };
+                spans.push(Span::styled(word, Style::default().fg(color).bg(code_bg)));
             }
             continue;
         }
@@ -1135,7 +1235,9 @@ fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Optio
         let ch = chars[i].to_string();
         spans.push(Span::styled(
             ch,
-            Style::default().fg(theme.code.fg.unwrap_or(Color::White)).bg(code_bg),
+            Style::default()
+                .fg(theme.code.fg.unwrap_or(Color::White))
+                .bg(code_bg),
         ));
         i += 1;
     }
@@ -1152,7 +1254,10 @@ fn render_code_line(text: &str, theme: &crate::theme::Theme, search_query: Optio
 
 /// Apply search highlighting on top of existing styled spans
 /// Preserves the original foreground color but adds yellow background for matches
-fn apply_search_highlighting_to_spans(spans: Vec<Span<'static>>, query: &str) -> Vec<Span<'static>> {
+fn apply_search_highlighting_to_spans(
+    spans: Vec<Span<'static>>,
+    query: &str,
+) -> Vec<Span<'static>> {
     let mut result = Vec::new();
     let query_lower = query.to_lowercase();
 
@@ -1169,14 +1274,12 @@ fn apply_search_highlighting_to_spans(spans: Vec<Span<'static>>, query: &str) ->
 
             // Add text before match (if any) with original style
             if idx > last_end {
-                result.push(Span::styled(
-                    text[last_end..idx].to_string(),
-                    span.style,
-                ));
+                result.push(Span::styled(text[last_end..idx].to_string(), span.style));
             }
 
             // Add highlighted match - preserve fg color, add yellow bg
-            let match_style = span.style
+            let match_style = span
+                .style
                 .bg(Color::Yellow)
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD);
@@ -1192,10 +1295,7 @@ fn apply_search_highlighting_to_spans(spans: Vec<Span<'static>>, query: &str) ->
         if has_match {
             // Add remaining text after last match (if any) with original style
             if last_end < text.len() {
-                result.push(Span::styled(
-                    text[last_end..].to_string(),
-                    span.style,
-                ));
+                result.push(Span::styled(text[last_end..].to_string(), span.style));
             }
         } else {
             // No match in this span, keep it as-is
@@ -1512,20 +1612,34 @@ fn render_table_block(
                 line_spans.push(Span::raw(indent_str.clone()));
             }
 
-            let separator_char = if app.config.render.use_utf8_graphics { "│" } else { "|" };
-            line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
+            let separator_char = if app.config.render.use_utf8_graphics {
+                "│"
+            } else {
+                "|"
+            };
+            line_spans.push(Span::styled(
+                separator_char.to_string(),
+                Style::default().fg(Color::Cyan),
+            ));
 
             for (col_idx, width) in widths.iter().enumerate() {
                 line_spans.push(Span::raw(" ".to_string()));
 
                 if is_separator {
-                    let cell_text = build_table_separator_cell(*width, &padded_cells[col_idx], app.config.render.use_utf8_graphics);
+                    let cell_text = build_table_separator_cell(
+                        *width,
+                        &padded_cells[col_idx],
+                        app.config.render.use_utf8_graphics,
+                    );
                     line_spans.push(Span::styled(
                         cell_text,
                         Style::default().fg(Color::DarkGray),
                     ));
                 } else {
-                    let cell_line = wrapped_cells[col_idx].get(line_offset).map(String::as_str).unwrap_or("");
+                    let cell_line = wrapped_cells[col_idx]
+                        .get(line_offset)
+                        .map(String::as_str)
+                        .unwrap_or("");
                     let mut cell_spans = style_inline_markdown(
                         cell_line,
                         app.theme.base,
@@ -1542,7 +1656,10 @@ fn render_table_block(
                 }
 
                 line_spans.push(Span::raw(" ".to_string()));
-                line_spans.push(Span::styled(separator_char.to_string(), Style::default().fg(Color::Cyan)));
+                line_spans.push(Span::styled(
+                    separator_char.to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
             }
 
             let is_selected = if let Some((start, end)) = selection_range {
@@ -1554,18 +1671,24 @@ fn render_table_block(
             // Apply highlighting directly to spans - priority order: selection > cursor
             if is_focused && is_selected {
                 // Visual line selection: apply cyan background to each span
-                line_spans = line_spans.into_iter().map(|mut span| {
-                    let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
-                    span.style = new_style;
-                    span
-                }).collect();
+                line_spans = line_spans
+                    .into_iter()
+                    .map(|mut span| {
+                        let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                        span.style = new_style;
+                        span
+                    })
+                    .collect();
             } else if is_focused && *source_idx == cursor {
                 // Cursor line: apply cursor background to each span
-                line_spans = line_spans.into_iter().map(|mut span| {
-                    let new_style = span.style.bg(app.theme.cursor_line_bg);
-                    span.style = new_style;
-                    span
-                }).collect();
+                line_spans = line_spans
+                    .into_iter()
+                    .map(|mut span| {
+                        let new_style = span.style.bg(app.theme.cursor_line_bg);
+                        span.style = new_style;
+                        span
+                    })
+                    .collect();
             }
 
             let line = Line::from(line_spans);
@@ -1604,7 +1727,12 @@ fn detect_list_item_indent(line: &str) -> Option<usize> {
     None
 }
 
-fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &mdx_core::config::RenderConfig, search_query: Option<&str>) -> Vec<Span<'static>> {
+fn style_markdown_line(
+    line: &str,
+    theme: &crate::theme::Theme,
+    render_config: &mdx_core::config::RenderConfig,
+    search_query: Option<&str>,
+) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
     // Check for horizontal rule
@@ -1643,7 +1771,10 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &
                 ));
             }
             // Check if this is a separator row (contains only -, :, and spaces)
-            let is_separator = part.trim().chars().all(|c| c == '-' || c == ':' || c == ' ');
+            let is_separator = part
+                .trim()
+                .chars()
+                .all(|c| c == '-' || c == ':' || c == ' ');
             if is_separator && !part.trim().is_empty() {
                 let separator_text = if render_config.use_utf8_graphics {
                     // Convert alignment markers to UTF-8 table separators
@@ -1686,7 +1817,12 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &
                 ));
             } else {
                 // Style content within cell
-                spans.extend(style_inline_markdown(part, theme.base, theme.code, search_query));
+                spans.extend(style_inline_markdown(
+                    part,
+                    theme.base,
+                    theme.code,
+                    search_query,
+                ));
             }
         }
         return spans;
@@ -1738,7 +1874,12 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &
             Style::default().fg(Color::Yellow),
         ));
         // Style the rest as inline markdown
-        spans.extend(style_inline_markdown(content, theme.base, theme.code, search_query));
+        spans.extend(style_inline_markdown(
+            content,
+            theme.base,
+            theme.code,
+            search_query,
+        ));
         return spans;
     }
 
@@ -1775,7 +1916,12 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &
         theme.base
     };
 
-    spans.extend(style_inline_markdown(content, base_style, theme.code, search_query));
+    spans.extend(style_inline_markdown(
+        content,
+        base_style,
+        theme.code,
+        search_query,
+    ));
 
     // If we didn't get any spans, just return the raw text
     if spans.is_empty() {
@@ -1790,8 +1936,13 @@ fn style_markdown_line(line: &str, theme: &crate::theme::Theme, render_config: &
 }
 
 /// Style inline markdown (bold, italic, code) within text
-fn style_inline_markdown(text: &str, base_style: Style, code_style: Style, search_query: Option<&str>) -> Vec<Span<'static>> {
-    use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+fn style_inline_markdown(
+    text: &str,
+    base_style: Style,
+    code_style: Style,
+    search_query: Option<&str>,
+) -> Vec<Span<'static>> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
     let mut spans = Vec::new();
     let parser = Parser::new(text);
@@ -1921,7 +2072,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     if in_search_mode {
         let search_prompt = if !app.search_matches.is_empty() {
             if let Some(current_idx) = app.search_current_match {
-                format!("/{} [{}/{}] ", app.search_query, current_idx + 1, app.search_matches.len())
+                format!(
+                    "/{} [{}/{}] ",
+                    app.search_query,
+                    current_idx + 1,
+                    app.search_matches.len()
+                )
             } else {
                 format!("/{} ", app.search_query)
             }
@@ -2002,8 +2158,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         if let Some(pane) = app.panes.focused_pane() {
             let cursor_line = pane.view.cursor_line;
             // Find nearest heading above
-            let has_heading_above = app.doc.headings.iter()
-                .any(|h| h.line <= cursor_line);
+            let has_heading_above = app.doc.headings.iter().any(|h| h.line <= cursor_line);
             if has_heading_above {
                 "  [IN SECTION]"
             } else {
@@ -2074,7 +2229,20 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     // Normal status bar
     let status_text = format!(
         " mdx  {}  {} lines  {} headings  {}:{}/{}  [{}{}]{}  [{}]{}{}{}{}",
-        filename, line_count, heading_count, filename, current_line, line_count, mode_str, selection_str, toc_indicator, theme_str, prefix_str, watch_str, search_str, fold_indicator
+        filename,
+        line_count,
+        heading_count,
+        filename,
+        current_line,
+        line_count,
+        mode_str,
+        selection_str,
+        toc_indicator,
+        theme_str,
+        prefix_str,
+        watch_str,
+        search_str,
+        fold_indicator
     );
 
     let status = Paragraph::new(Line::from(vec![Span::styled(
@@ -2112,9 +2280,12 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  j/k, ↓/↑          Move cursor down/up"),
         Line::from("  Ctrl+d/u          Scroll half page down/up"),
         Line::from("  Space, PgDn       Scroll full page down"),
@@ -2122,24 +2293,33 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  g, Home           Go to top"),
         Line::from("  G, End            Go to bottom"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Search", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Search",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  /                 Start search"),
         Line::from("  n                 Next match"),
         Line::from("  N                 Previous match"),
         Line::from("  Esc               Cancel search"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Visual Mode", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Visual Mode",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  V                 Enter visual line mode"),
         Line::from("  Y                 Yank (copy) selected lines"),
         Line::from("  Esc               Exit visual mode"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Folding", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Folding",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  ←                 Collapse current section"),
         Line::from("  →                 Expand current section"),
         Line::from("  za                Toggle fold of current section"),
@@ -2149,18 +2329,24 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  zR                Open all folds"),
         Line::from("  Note: Works on heading or anywhere in section"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Panes", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Panes",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  Ctrl+w s          Split horizontally"),
         Line::from("  Ctrl+w v          Split vertically"),
         Line::from("  Ctrl+w hjkl/↑↓←→  Move focus between panes"),
         Line::from("  Ctrl+↑↓←→         Move focus between panes"),
         Line::from("  q                 Close pane (quit if last)"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Mouse", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Mouse",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  Click pane        Focus pane and move cursor"),
         Line::from("  Click+drag        Select text (line-based)"),
         Line::from("  Ctrl+Shift+C      Copy selection to clipboard"),
@@ -2168,9 +2354,12 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
         Line::from("  Scroll wheel      Scroll pane or TOC"),
         Line::from("  Drag border       Resize split panes"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Other",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  t                 Toggle TOC sidebar"),
         Line::from("  T                 Open TOC dialog (full screen)"),
         Line::from("  m                 Toggle theme (dark/light)"),
@@ -2194,7 +2383,11 @@ fn render_help_popup(frame: &mut Frame, _app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Help - Press ? or Esc to close ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
 
@@ -2257,7 +2450,11 @@ fn render_toc_dialog(frame: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Table of Contents - j/k to navigate, Enter to jump, T/Esc to close ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
 
@@ -2284,7 +2481,9 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
     };
 
     // Find maximum label width for alignment
-    let max_label_width = dialog.fields.iter()
+    let max_label_width = dialog
+        .fields
+        .iter()
         .map(|f| f.label().len())
         .max()
         .unwrap_or(0);
@@ -2326,16 +2525,17 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
 
     option_lines.push(Line::from(""));
     option_lines.push(Line::from(""));
-    option_lines.push(Line::from(vec![
-        Span::styled(
-            "↑/↓: navigate  ←/→: change  Tab: select button  Enter: execute",
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
+    option_lines.push(Line::from(vec![Span::styled(
+        "↑/↓: navigate  ←/→: change  Tab: select button  Enter: execute",
+        Style::default().fg(Color::DarkGray),
+    )]));
 
     // Buttons line
     let buttons_line = {
-        let cancel_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Cancel) {
+        let cancel_style = if matches!(
+            dialog.focused_button,
+            crate::options_dialog::DialogButton::Cancel
+        ) {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -2343,7 +2543,10 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
             Style::default().fg(Color::White)
         };
 
-        let ok_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Ok) {
+        let ok_style = if matches!(
+            dialog.focused_button,
+            crate::options_dialog::DialogButton::Ok
+        ) {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -2351,7 +2554,10 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
             Style::default().fg(Color::White)
         };
 
-        let save_style = if matches!(dialog.focused_button, crate::options_dialog::DialogButton::Save) {
+        let save_style = if matches!(
+            dialog.focused_button,
+            crate::options_dialog::DialogButton::Save
+        ) {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -2381,7 +2587,11 @@ fn render_options_dialog(frame: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Options - Press O or Esc to close ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .style(Style::default().bg(Color::Rgb(30, 34, 42)));
 
@@ -2499,12 +2709,7 @@ fn render_image_info_placeholder(
     let alt_text = sanitize_for_terminal(alt_text);
 
     // Format image information
-    let info_text = format!(
-        "🖼  {} | {}x{}",
-        alt_text,
-        metadata.width,
-        metadata.height
-    );
+    let info_text = format!("🖼  {} | {}x{}", alt_text, metadata.width, metadata.height);
 
     // Check if this line is selected
     let is_selected = if let Some((start, end)) = selection_range {
@@ -2554,24 +2759,30 @@ fn render_image_info_placeholder(
         Style::default()
             .fg(Color::Rgb(100, 200, 255))
             .bg(Color::Rgb(30, 40, 50))
-            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
         // Visual line selection: apply cyan background to each span
-        line_spans = line_spans.into_iter().map(|mut span| {
-            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
-            span.style = new_style;
-            span
-        }).collect();
+        line_spans = line_spans
+            .into_iter()
+            .map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            })
+            .collect();
     } else if is_focused && source_line == cursor {
         // Cursor line: apply cursor background to each span
-        line_spans = line_spans.into_iter().map(|mut span| {
-            let new_style = span.style.bg(app.theme.cursor_line_bg);
-            span.style = new_style;
-            span
-        }).collect();
+        line_spans = line_spans
+            .into_iter()
+            .map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            })
+            .collect();
     }
 
     let line = Line::from(line_spans);
@@ -2650,26 +2861,30 @@ fn render_image_placeholder(
     // Add error placeholder
     line_spans.push(Span::styled(
         info_text,
-        Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     ));
 
     // Apply highlighting directly to spans - priority order: selection > cursor
     if is_focused && is_selected {
         // Visual line selection: apply cyan background to each span
-        line_spans = line_spans.into_iter().map(|mut span| {
-            let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
-            span.style = new_style;
-            span
-        }).collect();
+        line_spans = line_spans
+            .into_iter()
+            .map(|mut span| {
+                let new_style = span.style.bg(Color::Cyan).fg(Color::Black);
+                span.style = new_style;
+                span
+            })
+            .collect();
     } else if is_focused && source_line == cursor {
         // Cursor line: apply cursor background to each span
-        line_spans = line_spans.into_iter().map(|mut span| {
-            let new_style = span.style.bg(app.theme.cursor_line_bg);
-            span.style = new_style;
-            span
-        }).collect();
+        line_spans = line_spans
+            .into_iter()
+            .map(|mut span| {
+                let new_style = span.style.bg(app.theme.cursor_line_bg);
+                span.style = new_style;
+                span
+            })
+            .collect();
     }
 
     let line = Line::from(line_spans);
@@ -2726,8 +2941,7 @@ mod security_tests {
 
         let app = App::new(config, doc, vec![]);
         let image = app.doc.images.first().unwrap();
-        let result = super::try_load_image(&app, image, ratatui::layout::Rect::default())
-            .unwrap();
+        let result = super::try_load_image(&app, image, ratatui::layout::Rect::default()).unwrap();
 
         assert!(result.is_none());
     }
@@ -2823,11 +3037,7 @@ mod utf8_rendering_tests {
         let mut config = Config::default();
         config.render.use_utf8_graphics = true;
 
-        let test_cases = vec![
-            "- Item 1",
-            "* Item 2",
-            "+ Item 3",
-        ];
+        let test_cases = vec!["- Item 1", "* Item 2", "+ Item 3"];
 
         for line in test_cases {
             let spans = style_markdown_line(line, &theme, &config.render, None);
@@ -2835,8 +3045,11 @@ mod utf8_rendering_tests {
 
             // Should use UTF-8 bullet point
             assert!(output.contains('•'), "Failed for line: {}", line);
-            assert!(!output.starts_with('-') && !output.starts_with('*') && !output.starts_with('+'),
-                    "Should not start with ASCII markers for: {}", line);
+            assert!(
+                !output.starts_with('-') && !output.starts_with('*') && !output.starts_with('+'),
+                "Should not start with ASCII markers for: {}",
+                line
+            );
         }
     }
 
@@ -2906,6 +3119,10 @@ mod utf8_rendering_tests {
         let output = get_text_from_spans(&spans);
 
         // With default config (UTF-8 enabled), should have UTF-8 chars
-        assert!(output.contains('│'), "Expected UTF-8 vertical bar '│' in output: {}", output);
+        assert!(
+            output.contains('│'),
+            "Expected UTF-8 vertical bar '│' in output: {}",
+            output
+        );
     }
 }
