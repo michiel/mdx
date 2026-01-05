@@ -21,6 +21,12 @@ pub struct Theme {
     pub status_bar_bg: Color,
     pub collapsed_block_bg: Color,
     pub collapsed_indicator_fg: Color,
+    pub border: Color,
+    pub border_focused: Color,
+    pub scrollbar_track: Color,
+    pub scrollbar_track_unfocused: Color,
+    pub scrollbar_thumb: Color,
+    pub scrollbar_thumb_unfocused: Color,
     #[cfg(feature = "git")]
     pub diff_add: Style,
     #[cfg(feature = "git")]
@@ -88,6 +94,12 @@ impl Theme {
             status_bar_bg: Color::Rgb(52, 61, 70), // Muted blue-gray
             collapsed_block_bg: Color::Rgb(35, 38, 45), // Slightly darker than normal bg
             collapsed_indicator_fg: Color::Rgb(86, 182, 194), // Cyan, matches TOC active
+            border: Color::Rgb(60, 60, 60),
+            border_focused: Color::Rgb(97, 175, 239), // Bright blue
+            scrollbar_track: Color::Rgb(50, 50, 50),  // Darker for more contrast
+            scrollbar_track_unfocused: Color::Rgb(45, 45, 45), // Even more subtle
+            scrollbar_thumb: Color::Rgb(97, 175, 239), // Bright blue, matches focused border
+            scrollbar_thumb_unfocused: Color::Rgb(100, 100, 100), // More visible gray
             #[cfg(feature = "git")]
             diff_add: Style::default().fg(Color::Rgb(152, 195, 121)), // Softer green
             #[cfg(feature = "git")]
@@ -147,6 +159,12 @@ impl Theme {
             status_bar_bg: Color::Rgb(36, 41, 46), // Dark background for contrast
             collapsed_block_bg: Color::Rgb(235, 240, 245), // Slightly darker than normal bg
             collapsed_indicator_fg: Color::Rgb(0, 128, 128), // Teal, matches H2
+            border: Color::Rgb(209, 213, 218),     // Soft gray border
+            border_focused: Color::Rgb(3, 102, 214), // Deep blue
+            scrollbar_track: Color::Rgb(225, 230, 235), // Lighter for more contrast
+            scrollbar_track_unfocused: Color::Rgb(235, 238, 241), // Very light gray
+            scrollbar_thumb: Color::Rgb(3, 102, 214), // Deep blue, matches focused border
+            scrollbar_thumb_unfocused: Color::Rgb(140, 150, 160), // Darker for visibility
             #[cfg(feature = "git")]
             diff_add: Style::default().fg(Color::Rgb(34, 134, 58)), // Forest green
             #[cfg(feature = "git")]

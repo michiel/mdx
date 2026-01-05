@@ -970,8 +970,15 @@ pub fn handle_input(
         return Ok(Action::Continue);
     }
 
-    // Y - yank in visual line mode
+    // y or Y - yank in visual line mode
     if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('y'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    ) || matches!(
         key,
         KeyEvent {
             code: KeyCode::Char('Y'),

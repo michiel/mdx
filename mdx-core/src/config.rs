@@ -10,12 +10,14 @@ use crate::security::SecurityEvent;
 #[serde(default)]
 pub struct RenderConfig {
     pub use_utf8_graphics: bool,
+    pub show_scrollbar: bool,
 }
 
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             use_utf8_graphics: true,
+            show_scrollbar: true,
         }
     }
 }

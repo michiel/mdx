@@ -243,7 +243,26 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .split(area);
 
     let breadcrumb_area = chunks[0];
-    let content_area = chunks[1];
+    let mut content_area = chunks[1];
+
+    // Split content area for scrollbar if enabled and document is larger than viewport
+    let doc_line_count = app.doc.line_count();
+    let viewport_height = content_area.height.saturating_sub(2) as usize; // Account for borders
+    let show_scrollbar = app.config.render.show_scrollbar && doc_line_count > viewport_height;
+
+    let scrollbar_area = if show_scrollbar {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(1),    // Main content
+                Constraint::Length(1), // Scrollbar
+            ])
+            .split(content_area);
+        content_area = chunks[0];
+        Some(chunks[1])
+    } else {
+        None
+    };
 
     // Render breadcrumb
     render_breadcrumb(frame, app, breadcrumb_area, pane_id);
@@ -280,6 +299,17 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             selection_range,
             line_count,
         );
+        // Render scrollbar if enabled
+        if let Some(scrollbar_area) = scrollbar_area {
+            render_scrollbar(
+                frame,
+                app,
+                scrollbar_area,
+                pane_id,
+                doc_line_count,
+                viewport_height,
+            );
+        }
         return;
     }
 
@@ -865,6 +895,18 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .style(app.theme.base);
 
     frame.render_widget(paragraph, content_area);
+
+    // Render scrollbar if enabled
+    if let Some(scrollbar_area) = scrollbar_area {
+        render_scrollbar(
+            frame,
+            app,
+            scrollbar_area,
+            pane_id,
+            doc_line_count,
+            viewport_height,
+        );
+    }
 }
 
 /// Render breadcrumb bar with heading hierarchy and git status
@@ -956,6 +998,111 @@ fn render_breadcrumb(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, 
 
     let breadcrumb_line = Line::from(spans);
     frame.render_widget(Paragraph::new(vec![breadcrumb_line]), area);
+}
+
+/// Render scrollbar for the pane
+fn render_scrollbar(
+    frame: &mut Frame,
+    app: &App,
+    area: ratatui::layout::Rect,
+    pane_id: usize,
+    doc_line_count: usize,
+    viewport_height: usize,
+) {
+    use ratatui::text::Span;
+
+    // Get the pane's scroll position
+    let pane = match app.panes.panes.get(&pane_id) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let scroll = pane.view.scroll_line;
+    let is_focused = app.panes.focused == pane_id;
+
+    // Calculate scrollbar dimensions
+    let scrollbar_height = area.height.saturating_sub(2) as usize; // Account for borders
+    if scrollbar_height == 0 {
+        return;
+    }
+
+    // Calculate thumb position and size
+    let max_scroll = doc_line_count.saturating_sub(viewport_height);
+
+    // Reserve space for top/bottom indicators
+    let available_height = scrollbar_height.saturating_sub(2); // Reserve 1 line each for top/bottom
+
+    // Calculate thumb size - ensure it's proportional but leave room for indicators
+    // Minimum thumb size of 2, maximum of available_height - 2 (to always show some track)
+    let thumb_size = if available_height > 0 {
+        let ratio = viewport_height as f32 / doc_line_count as f32;
+        let size = (ratio * available_height as f32).ceil() as usize;
+        size.max(2).min(available_height.saturating_sub(2))
+    } else {
+        1
+    };
+
+    // Calculate thumb position within the available space (between top and bottom indicators)
+    let thumb_position = if max_scroll > 0 && available_height > thumb_size {
+        let available_for_movement = available_height - thumb_size;
+        let pos =
+            ((scroll as f32 / max_scroll as f32) * available_for_movement as f32).round() as usize;
+        pos + 1 // +1 to account for top indicator
+    } else {
+        1 // Start after top indicator
+    };
+
+    // Build scrollbar lines with visual indicators
+    let mut lines = Vec::new();
+    let (scrollbar_char, thumb_char, top_char, bottom_char) = if app.config.render.use_utf8_graphics
+    {
+        ("┊", "█", "▴", "▾") // Lighter track, solid thumb, small arrows
+    } else {
+        (".", "#", "^", "v")
+    };
+
+    let track_style = if is_focused {
+        Style::default().fg(app.theme.scrollbar_track)
+    } else {
+        Style::default().fg(app.theme.scrollbar_track_unfocused)
+    };
+
+    let thumb_style = if is_focused {
+        Style::default().fg(app.theme.scrollbar_thumb)
+    } else {
+        Style::default().fg(app.theme.scrollbar_thumb_unfocused)
+    };
+
+    // Build the scrollbar with clear visual indicators
+    for i in 0..scrollbar_height {
+        let (char_to_use, style) = if i == 0 {
+            // Always show top indicator
+            if scroll > 0 {
+                (top_char, thumb_style) // Highlight if can scroll up
+            } else {
+                (top_char, track_style) // Dimmed if at top
+            }
+        } else if i == scrollbar_height - 1 {
+            // Always show bottom indicator
+            if scroll + viewport_height < doc_line_count {
+                (bottom_char, thumb_style) // Highlight if can scroll down
+            } else {
+                (bottom_char, track_style) // Dimmed if at bottom
+            }
+        } else if i >= thumb_position && i < thumb_position + thumb_size {
+            // Thumb area
+            (thumb_char, thumb_style)
+        } else {
+            // Track area
+            (scrollbar_char, track_style)
+        };
+
+        lines.push(Line::from(Span::styled(char_to_use, style)));
+    }
+
+    let paragraph = Paragraph::new(lines);
+
+    frame.render_widget(paragraph, area);
 }
 
 /// Render raw text without markdown processing

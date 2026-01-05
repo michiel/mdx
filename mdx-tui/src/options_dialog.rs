@@ -18,6 +18,7 @@ pub enum OptionField {
     SafeMode,
     NoExec,
     Utf8Graphics,
+    ShowScrollbar,
     #[cfg(feature = "watch")]
     WatchEnabled,
     #[cfg(feature = "watch")]
@@ -38,6 +39,7 @@ impl OptionField {
             OptionField::SafeMode,
             OptionField::NoExec,
             OptionField::Utf8Graphics,
+            OptionField::ShowScrollbar,
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled,
             #[cfg(feature = "watch")]
@@ -58,6 +60,7 @@ impl OptionField {
             OptionField::SafeMode => "Safe Mode",
             OptionField::NoExec => "No Exec",
             OptionField::Utf8Graphics => "UTF-8 Graphics",
+            OptionField::ShowScrollbar => "Show Scrollbar",
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => "File Watching",
             #[cfg(feature = "watch")]
@@ -142,6 +145,10 @@ impl OptionsDialog {
                 self.editing_config.render.use_utf8_graphics =
                     !self.editing_config.render.use_utf8_graphics;
             }
+            OptionField::ShowScrollbar => {
+                self.editing_config.render.show_scrollbar =
+                    !self.editing_config.render.show_scrollbar;
+            }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => {
                 self.editing_config.watch.enabled = !self.editing_config.watch.enabled;
@@ -171,6 +178,9 @@ impl OptionsDialog {
             OptionField::NoExec => format!("{}", self.editing_config.security.no_exec),
             OptionField::Utf8Graphics => {
                 format!("{}", self.editing_config.render.use_utf8_graphics)
+            }
+            OptionField::ShowScrollbar => {
+                format!("{}", self.editing_config.render.show_scrollbar)
             }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => format!("{}", self.editing_config.watch.enabled),
