@@ -1021,7 +1021,7 @@ fn render_scrollbar(
     let is_focused = app.panes.focused == pane_id;
 
     // Calculate scrollbar dimensions
-    let scrollbar_height = area.height.saturating_sub(2) as usize; // Account for borders
+    let scrollbar_height = area.height as usize;
     if scrollbar_height == 0 {
         return;
     }
