@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-05
+
+### Added
+- Visual scrollbar in the right margin of panes
+  - Up/down arrow indicators (▴/▾) that highlight when scrolling is available
+  - Proportional thumb showing current viewport position
+  - Track showing scrollable area
+  - Focus-aware colors matching border theme
+  - Only appears when document height exceeds viewport height
+- `show_scrollbar` option in RenderConfig (default: `true`)
+- Scrollbar toggle in the interactive options dialog
+- Stdin support - pipe markdown content directly to mdx (e.g., `cat file.md | mdx`, `curl url | mdx`)
+- Unified Vim-style navigation for TOC (both sidebar and dialog)
+  - Ctrl+d/Ctrl+u for half-page scrolling
+  - g/G for jump to top/bottom
+  - PageDown/PageUp and Space for full-page scrolling
+  - Home/End for jump to top/bottom
+- Ctrl+L key binding to force screen redraw
+- Lowercase `y` key for yank in visual line mode (in addition to `Y`)
+
+### Fixed
+- Scrollbar thumb positioning now uses full height, allowing it to reach top and bottom positions
+- Collapsed section rendering gaps eliminated
+- Improved installer error handling for both bash and PowerShell scripts
+
+## [0.2.0] - 2024-12-XX
+
 ### Added
 - Configurable UTF-8 graphics rendering for enhanced terminal display
   - UTF-8 box-drawing characters for tables (`│` instead of `|`, `─` instead of `-`)
@@ -62,5 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multiple theme support (dark/light)
 - Configuration file management
 
-[Unreleased]: https://github.com/yourusername/mdx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/yourusername/mdx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/michiel/mdx/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/michiel/mdx/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/michiel/mdx/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/michiel/mdx/releases/tag/v0.1.0
