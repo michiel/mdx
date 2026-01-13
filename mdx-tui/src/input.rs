@@ -28,7 +28,7 @@ pub fn handle_input(
         app.clear_status_message();
     }
 
-    // Handle close pane with 'q' - quit if last pane
+    // Handle close pane with 'q' - quit if last pane (but not in search mode)
     if matches!(
         key,
         KeyEvent {
@@ -37,14 +37,27 @@ pub fn handle_input(
             ..
         }
     ) {
-        // Try to close the focused pane
-        let has_remaining_panes = app.panes.close_focused();
-        if !has_remaining_panes {
-            // Was the last pane, quit the app
-            app.quit();
-            return Ok(Action::Quit);
+        // Don't quit if we're in search mode (q is part of search input)
+        // or visual line mode (should use Esc to exit first)
+        let in_special_mode = app
+            .panes
+            .focused_pane()
+            .map(|p| {
+                p.view.mode == crate::app::Mode::Search
+                    || p.view.mode == crate::app::Mode::VisualLine
+            })
+            .unwrap_or(false);
+
+        if !in_special_mode {
+            // Try to close the focused pane
+            let has_remaining_panes = app.panes.close_focused();
+            if !has_remaining_panes {
+                // Was the last pane, quit the app
+                app.quit();
+                return Ok(Action::Quit);
+            }
+            return Ok(Action::Continue);
         }
-        return Ok(Action::Continue);
     }
 
     // Handle Ctrl+C
