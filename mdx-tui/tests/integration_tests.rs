@@ -394,3 +394,49 @@ fn integration_render_fills_viewport_when_skipping_fences() {
         "expected the last content row to include line numbers"
     );
 }
+
+#[test]
+fn integration_q_does_not_quit_in_search_mode() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mdx_tui::input::{handle_input, Action};
+
+    let content = "# Test Document\n\nSome content here.\n";
+    let (mut app, _file) = create_test_app(content);
+
+    // Enter search mode
+    app.enter_search_mode();
+
+    // Press 'q' - should add to search query, not quit
+    let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    let action = handle_input(&mut app, key, 20, 80).expect("handle_input failed");
+
+    assert_eq!(action, Action::Continue, "'q' should not quit in search mode");
+    assert!(!app.should_quit, "app should not be marked for quit");
+    assert_eq!(app.search_query, "q", "search query should contain 'q'");
+}
+
+#[test]
+fn integration_q_does_not_quit_in_visual_line_mode() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mdx_tui::input::{handle_input, Action};
+
+    let content = "Line 1\nLine 2\nLine 3\n";
+    let (mut app, _file) = create_test_app(content);
+
+    // Enter visual line mode
+    app.enter_visual_line_mode();
+
+    // Press 'q' - should be ignored (not quit)
+    let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    let action = handle_input(&mut app, key, 20, 80).expect("handle_input failed");
+
+    assert_eq!(
+        action,
+        Action::Continue,
+        "'q' should not quit in visual line mode"
+    );
+    assert!(
+        !app.should_quit,
+        "app should not be marked for quit in visual line mode"
+    );
+}
