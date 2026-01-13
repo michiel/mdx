@@ -27,7 +27,7 @@ anyhow = "1.0"
 
 # Terminal UI
 ratatui = "0.30"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
 unicode-width = "0.2"
 
 # Markdown rendering for TUI
