@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Michiel Kalkman <michiel@nosuchtype.com>"]
 license = "MIT OR Apache-2.0"
@@ -27,7 +27,7 @@ anyhow = "1.0"
 
 # Terminal UI
 ratatui = "0.30"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
 unicode-width = "0.2"
 
 # Markdown rendering for TUI
