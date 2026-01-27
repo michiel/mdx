@@ -28,6 +28,36 @@ pub fn handle_input(
         app.clear_status_message();
     }
 
+    if app.command_output.is_some() {
+        app.command_output = None;
+        return Ok(Action::Continue);
+    }
+
+    let pane_viewport = app.focused_viewport();
+    let pane_height = pane_viewport
+        .map(|v| v.visible_height)
+        .filter(|&h| h > 0)
+        .unwrap_or(viewport_height);
+    let pane_width = pane_viewport
+        .map(|v| v.content_width)
+        .filter(|&w| w > 0)
+        .unwrap_or(viewport_width);
+
+    if let Some(pane) = app.panes.focused_pane() {
+        if pane.view.mode == crate::app::Mode::VisualLine
+            && matches!(
+                key,
+                KeyEvent {
+                    code: KeyCode::Char('|'),
+                    ..
+                }
+            )
+        {
+            app.enter_visual_command_mode();
+            return Ok(Action::Continue);
+        }
+    }
+
     // Handle close pane with 'q' - quit if last pane (but not in search mode)
     if matches!(
         key,
@@ -750,10 +780,9 @@ pub fn handle_input(
         _ => {}
     }
 
-    // Handle search mode input
     if let Some(pane) = app.panes.focused_pane() {
-        if pane.view.mode == crate::app::Mode::Search {
-            match key {
+        match pane.view.mode {
+            crate::app::Mode::Search => match key {
                 // Enter - execute search and exit search mode
                 KeyEvent {
                     code: KeyCode::Enter,
@@ -792,7 +821,39 @@ pub fn handle_input(
                 }
 
                 _ => return Ok(Action::Continue),
-            }
+            },
+            crate::app::Mode::VisualCommand => match key {
+                KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                } => {
+                    app.run_visual_command();
+                    return Ok(Action::Continue);
+                }
+                KeyEvent {
+                    code: KeyCode::Esc, ..
+                } => {
+                    app.cancel_visual_command();
+                    return Ok(Action::Continue);
+                }
+                KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                } => {
+                    app.backspace_visual_command();
+                    return Ok(Action::Continue);
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                    ..
+                } => {
+                    app.append_visual_command_char(c);
+                    return Ok(Action::Continue);
+                }
+                _ => return Ok(Action::Continue),
+            },
+            _ => {}
         }
     }
 
@@ -1035,7 +1096,7 @@ pub fn handle_input(
             ..
         }
     ) {
-        app.next_search_match(viewport_height);
+        app.next_search_match(pane_height);
         return Ok(Action::Continue);
     }
 
@@ -1048,7 +1109,7 @@ pub fn handle_input(
             ..
         }
     ) {
-        app.prev_search_match(viewport_height);
+        app.prev_search_match(pane_height);
         return Ok(Action::Continue);
     }
 
@@ -1259,7 +1320,7 @@ pub fn handle_input(
             ..
         } => {
             app.move_cursor_down(1);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         // k - move up
@@ -1269,7 +1330,7 @@ pub fn handle_input(
             ..
         } => {
             app.move_cursor_up(1);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         // Ctrl+d - half page down
@@ -1278,8 +1339,8 @@ pub fn handle_input(
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.scroll_half_page_down(viewport_height, viewport_width);
-            app.auto_scroll(viewport_height);
+            app.scroll_half_page_down(pane_height, pane_width);
+            app.auto_scroll(pane_height);
         }
 
         // Ctrl+u - half page up
@@ -1288,8 +1349,8 @@ pub fn handle_input(
             modifiers: KeyModifiers::CONTROL,
             ..
         } => {
-            app.scroll_half_page_up(viewport_height, viewport_width);
-            app.auto_scroll(viewport_height);
+            app.scroll_half_page_up(pane_height, pane_width);
+            app.auto_scroll(pane_height);
         }
 
         // g - prefix for gg (go to top)
@@ -1300,7 +1361,7 @@ pub fn handle_input(
         } => {
             // For now, implement gg as single 'g' (proper prefix state in later enhancement)
             app.jump_to_line(0);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         // G - go to bottom
@@ -1311,7 +1372,7 @@ pub fn handle_input(
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
             app.jump_to_line(last_line);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         // Arrow keys - same as j/k for up/down, collapse/expand for left/right
@@ -1321,7 +1382,7 @@ pub fn handle_input(
             ..
         } => {
             app.move_cursor_down(1);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         KeyEvent {
@@ -1330,7 +1391,7 @@ pub fn handle_input(
             ..
         } => {
             app.move_cursor_up(1);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         // Left arrow - collapse the section at or above cursor
@@ -1361,16 +1422,16 @@ pub fn handle_input(
             code: KeyCode::PageDown,
             ..
         } => {
-            app.move_cursor_down(viewport_height);
-            app.auto_scroll(viewport_height);
+            app.move_cursor_down(pane_height);
+            app.auto_scroll(pane_height);
         }
 
         KeyEvent {
             code: KeyCode::PageUp,
             ..
         } => {
-            app.move_cursor_up(viewport_height);
-            app.auto_scroll(viewport_height);
+            app.move_cursor_up(pane_height);
+            app.auto_scroll(pane_height);
         }
 
         // Space - same as PageDown
@@ -1379,8 +1440,8 @@ pub fn handle_input(
             modifiers: KeyModifiers::NONE,
             ..
         } => {
-            app.move_cursor_down(viewport_height);
-            app.auto_scroll(viewport_height);
+            app.move_cursor_down(pane_height);
+            app.auto_scroll(pane_height);
         }
 
         // Home/End - same as g/G
@@ -1389,7 +1450,7 @@ pub fn handle_input(
             ..
         } => {
             app.jump_to_line(0);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         KeyEvent {
@@ -1397,7 +1458,7 @@ pub fn handle_input(
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
             app.jump_to_line(last_line);
-            app.auto_scroll(viewport_height);
+            app.auto_scroll(pane_height);
         }
 
         _ => {}
@@ -1464,7 +1525,6 @@ struct LayoutInfo {
     toc_rect: Option<Rect>,
     pane_rects: std::collections::HashMap<PaneId, Rect>,
     split_boundaries: Vec<crate::panes::SplitBoundary>,
-    panes_area: Rect, // Area where panes are rendered (for ratio calculations)
 }
 
 /// Compute layout information matching ui.rs
@@ -1526,7 +1586,6 @@ fn compute_layout_info(app: &App, term_width: u16, term_height: u16) -> LayoutIn
         toc_rect,
         pane_rects,
         split_boundaries,
-        panes_area,
     }
 }
 

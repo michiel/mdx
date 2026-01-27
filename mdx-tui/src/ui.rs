@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 
@@ -73,6 +73,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Compute layout for all panes and render them
     let pane_layouts = app.panes.compute_layout(pane_area);
+    app.update_layout_context(&pane_layouts);
     for (pane_id, rect) in pane_layouts.iter() {
         render_markdown(frame, app, *rect, *pane_id);
     }
@@ -93,6 +94,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Render TOC dialog if active
     if app.show_toc_dialog {
         render_toc_dialog(frame, app);
+    }
+
+    if app.command_output.is_some() {
+        render_command_output(frame, app);
     }
 }
 
@@ -2208,6 +2213,34 @@ fn render_toc(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // Check if we're in visual command mode
+    let in_visual_command_mode = if let Some(pane) = app.panes.focused_pane() {
+        pane.view.mode == crate::app::Mode::VisualCommand
+    } else {
+        false
+    };
+
+    if in_visual_command_mode {
+        let mut spans = Vec::new();
+        spans.push(Span::styled(
+            format!("|{} ", app.visual_command_buffer),
+            Style::default()
+                .fg(app.theme.status_bar_fg)
+                .bg(app.theme.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            "(enter to run, esc to cancel)",
+            Style::default()
+                .fg(app.theme.status_bar_fg)
+                .bg(app.theme.status_bar_bg),
+        ));
+
+        let status = Paragraph::new(Line::from(spans)).style(app.theme.base);
+        frame.render_widget(status, area);
+        return;
+    }
+
     // Check if we're in search mode
     let in_search_mode = if let Some(pane) = app.panes.focused_pane() {
         pane.view.mode == crate::app::Mode::Search
@@ -2267,6 +2300,13 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                     end - start + 1
                 });
                 ("V-LINE", count)
+            }
+            crate::app::Mode::VisualCommand => {
+                let count = pane.view.selection.as_ref().map(|sel| {
+                    let (start, end) = sel.range();
+                    end - start + 1
+                });
+                ("CMD", count)
             }
             crate::app::Mode::Search => ("SEARCH", None),
         };
@@ -2401,6 +2441,44 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     )]));
 
     frame.render_widget(status, area);
+}
+
+fn render_command_output(frame: &mut Frame, app: &App) {
+    if let Some(output) = &app.command_output {
+        let area = frame.area();
+        let mut lines = Vec::new();
+        lines.push(Line::from(Span::styled(
+            format!("| {} ", output.command),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "(press any key to return)",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        if output.output.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "<no output>",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for line in output.output.lines() {
+                lines.push(Line::from(Span::raw(line.to_string())));
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightBlue))
+            .title(" Command Output ");
+
+        let paragraph = Paragraph::new(lines).block(block).style(app.theme.base);
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(paragraph, area);
+    }
 }
 
 fn render_help_popup(frame: &mut Frame, _app: &App) {
@@ -3043,10 +3121,6 @@ fn render_image_placeholder(
 #[cfg(test)]
 mod security_tests {
     use super::sanitize_for_terminal;
-    use crate::app::App;
-    use mdx_core::{Config, Document};
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn security_sanitises_control_characters() {

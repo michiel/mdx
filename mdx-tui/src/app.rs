@@ -3,6 +3,10 @@
 use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
 use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
+use ratatui::layout::Rect;
+use std::collections::HashMap;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// Application mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,6 +14,7 @@ pub enum Mode {
     Normal,
     VisualLine,
     Search,
+    VisualCommand,
 }
 
 /// Mouse interaction state
@@ -64,6 +69,65 @@ impl ViewState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PaneViewport {
+    pub visible_height: usize,
+    pub content_width: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LayoutContext {
+    viewports: HashMap<PaneId, PaneViewport>,
+}
+
+impl LayoutContext {
+    pub fn new() -> Self {
+        Self {
+            viewports: HashMap::new(),
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        layout: &HashMap<PaneId, Rect>,
+        doc_line_count: usize,
+        show_scrollbar_flag: bool,
+    ) {
+        self.viewports.clear();
+        for (pane_id, rect) in layout {
+            let viewport = PaneViewport::from_rect(*rect, doc_line_count, show_scrollbar_flag);
+            self.viewports.insert(*pane_id, viewport);
+        }
+    }
+
+    pub fn focused_viewport(&self, pane_id: PaneId) -> Option<PaneViewport> {
+        self.viewports.get(&pane_id).copied()
+    }
+}
+
+impl PaneViewport {
+    fn from_rect(rect: Rect, doc_line_count: usize, show_scrollbar_flag: bool) -> Self {
+        let content_area_height = rect.height.saturating_sub(1);
+        let visible_height = content_area_height.saturating_sub(2) as usize;
+        let mut content_width = rect.width.saturating_sub(2);
+        let has_scrollbar = show_scrollbar_flag && doc_line_count > visible_height;
+        if has_scrollbar {
+            content_width = content_width.saturating_sub(1);
+        }
+
+        Self {
+            visible_height,
+            content_width: content_width as usize,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandOutput {
+    pub command: String,
+    pub output: String,
+}
+
 /// Type of status message
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusMessageKind {
@@ -97,6 +161,9 @@ pub struct App {
     pub show_security_warnings: bool,
     pub status_message: Option<(String, StatusMessageKind)>,
     pub mouse_state: MouseState,
+    pub layout_context: LayoutContext,
+    pub visual_command_buffer: String,
+    pub command_output: Option<CommandOutput>,
     #[cfg(feature = "watch")]
     pub watcher: Option<crate::watcher::FileWatcher>,
     #[cfg(feature = "git")]
@@ -106,11 +173,16 @@ pub struct App {
 impl App {
     /// Create a new application instance with a document and security warnings
     pub fn new(config: Config, doc: Document, warnings: Vec<mdx_core::SecurityEvent>) -> Self {
-        let mut config = config;
         #[cfg(feature = "images")]
-        if config.security.safe_mode {
-            config.images.enabled = false;
-        }
+        let mut config = {
+            let mut cfg = config;
+            if cfg.security.safe_mode {
+                cfg.images.enabled = false;
+            }
+            cfg
+        };
+        #[cfg(not(feature = "images"))]
+        let config = config;
 
         let show_toc = config.toc.enabled;
         let theme_variant = config.theme;
@@ -165,11 +237,26 @@ impl App {
             show_security_warnings,
             status_message: None,
             mouse_state: MouseState::Idle,
+            layout_context: LayoutContext::new(),
+            visual_command_buffer: String::new(),
+            command_output: None,
             #[cfg(feature = "watch")]
             watcher,
             #[cfg(feature = "git")]
             diff_worker,
         }
+    }
+
+    pub fn update_layout_context(&mut self, layout: &HashMap<PaneId, Rect>) {
+        self.layout_context.update(
+            layout,
+            self.doc.line_count(),
+            self.config.render.show_scrollbar,
+        );
+    }
+
+    pub fn focused_viewport(&self) -> Option<PaneViewport> {
+        self.layout_context.focused_viewport(self.panes.focused)
     }
 
     /// Set an error message to display in the status bar
@@ -819,6 +906,117 @@ impl App {
                     selection.cursor = pane.view.cursor_line;
                 }
             }
+        }
+    }
+
+    /// Enter visual command mode (press '|' while in visual line mode)
+    pub fn enter_visual_command_mode(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            if pane.view.mode == Mode::VisualLine {
+                pane.view.mode = Mode::VisualCommand;
+                self.visual_command_buffer.clear();
+            }
+        }
+    }
+
+    /// Cancel command entry (Esc)
+    pub fn cancel_visual_command(&mut self) {
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::VisualLine;
+        }
+        self.visual_command_buffer.clear();
+    }
+
+    /// Add a character to the visual command buffer
+    pub fn append_visual_command_char(&mut self, c: char) {
+        self.visual_command_buffer.push(c);
+    }
+
+    /// Remove the last character from the visual command buffer
+    pub fn backspace_visual_command(&mut self) {
+        self.visual_command_buffer.pop();
+    }
+
+    /// Execute the buffered command with the current visual selection as STDIN
+    pub fn run_visual_command(&mut self) {
+        let command_line = self.visual_command_buffer.trim().to_string();
+        let output_text = if command_line.is_empty() {
+            "Command cannot be empty".to_string()
+        } else if let Some(selection) = self.visual_selection_text() {
+            self.execute_shell_command(&command_line, &selection)
+        } else {
+            "Visual selection is missing".to_string()
+        };
+
+        self.command_output = Some(CommandOutput {
+            command: command_line.clone(),
+            output: output_text,
+        });
+
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.mode = Mode::VisualLine;
+        }
+        self.visual_command_buffer.clear();
+    }
+
+    /// Get the text encompassed by the current visual selection
+    pub fn visual_selection_text(&self) -> Option<String> {
+        let pane = self.panes.focused_pane()?;
+        let selection = pane.view.selection?;
+        let (start, end) = selection.range();
+        if start > end {
+            return None;
+        }
+        let mut text = self.doc.get_lines(start, end);
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        Some(text)
+    }
+
+    fn execute_shell_command(&self, command: &str, input: &str) -> String {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C");
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.arg("-c");
+            c
+        };
+
+        cmd.arg(command)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(input.as_bytes());
+                }
+                match child.wait_with_output() {
+                    Ok(output) => {
+                        let mut result = String::new();
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        result.push_str(&stdout);
+
+                        if !output.stderr.is_empty() {
+                            if !result.ends_with('\n') {
+                                result.push('\n');
+                            }
+                            result.push_str("--- stderr ---\n");
+                            result.push_str(&String::from_utf8_lossy(&output.stderr));
+                        }
+
+                        let code = output.status.code().unwrap_or(-1);
+                        result.push_str(&format!("\n[exit code {}]", code));
+                        result
+                    }
+                    Err(e) => format!("Failed to capture command output: {}", e),
+                }
+            }
+            Err(e) => format!("Failed to start shell: {}", e),
         }
     }
 
