@@ -43,7 +43,7 @@ directories = "5.0"
 arboard = "3.4"
 
 # File watching
-notify = "6.1"
+notify = "8.2"
 
 # Git diff
 similar = "2.6"
