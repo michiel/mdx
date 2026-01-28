@@ -2,7 +2,10 @@
 
 use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
-use mdx_core::{config::ThemeVariant, Config, Document, LineSelection};
+use log::info;
+use mdx_core::{
+    config::ThemeVariant, detect_front_matter, Config, Document, FrontMatter, LineSelection,
+};
 use ratatui::layout::Rect;
 use std::collections::HashMap;
 use std::io::Write;
@@ -140,6 +143,7 @@ pub enum StatusMessageKind {
 pub struct App {
     pub config: Config,
     pub doc: Document,
+    pub front_matter: Option<FrontMatter>,
     pub panes: PaneManager,
     pub theme: Theme,
     pub theme_variant: ThemeVariant,
@@ -174,7 +178,7 @@ impl App {
     /// Create a new application instance with a document and security warnings
     pub fn new(config: Config, doc: Document, warnings: Vec<mdx_core::SecurityEvent>) -> Self {
         #[cfg(feature = "images")]
-        let mut config = {
+        let config = {
             let mut cfg = config;
             if cfg.security.safe_mode {
                 cfg.images.enabled = false;
@@ -213,9 +217,10 @@ impl App {
             worker
         };
 
-        Self {
+        let mut app = Self {
             config,
             doc,
+            front_matter: None,
             panes,
             theme,
             theme_variant,
@@ -244,6 +249,49 @@ impl App {
             watcher,
             #[cfg(feature = "git")]
             diff_worker,
+        };
+
+        app.refresh_front_matter_info();
+
+        app
+    }
+
+    fn refresh_front_matter_info(&mut self) {
+        if self.config.render.skip_front_matter {
+            self.front_matter = detect_front_matter(&self.doc.rope);
+            if let Some(fm) = self.front_matter {
+                info!("Skipping {} front matter", fm.kind);
+            }
+        } else {
+            self.front_matter = None;
+        }
+        self.enforce_rendered_bounds();
+    }
+
+    pub(crate) fn rendered_content_bounds(&self) -> (usize, usize) {
+        let line_count = self.doc.line_count();
+        if line_count == 0 {
+            return (0, 0);
+        }
+
+        let max_line = line_count - 1;
+        let start_line = self
+            .front_matter
+            .map(|fm| (fm.end_line + 1).min(line_count))
+            .unwrap_or(0);
+
+        if start_line > max_line {
+            (max_line, max_line)
+        } else {
+            (start_line, max_line)
+        }
+    }
+
+    fn enforce_rendered_bounds(&mut self) {
+        let bounds = self.rendered_content_bounds();
+        for pane in self.panes.panes.values_mut() {
+            pane.view.cursor_line = pane.view.cursor_line.clamp(bounds.0, bounds.1);
+            pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, bounds.1);
         }
     }
 
@@ -298,6 +346,7 @@ impl App {
     pub fn apply_options(&mut self) {
         if let Some(dialog) = &self.options_dialog {
             self.config = dialog.get_config();
+            self.refresh_front_matter_info();
             // Update theme if it changed
             if self.config.theme != self.theme_variant {
                 self.theme_variant = self.config.theme;
@@ -317,6 +366,7 @@ impl App {
             mdx_core::Config::save_to_file(&new_config)?;
             // Apply changes
             self.config = new_config;
+            self.refresh_front_matter_info();
             // Update theme if it changed
             if self.config.theme != self.theme_variant {
                 self.theme_variant = self.config.theme;
@@ -348,13 +398,7 @@ impl App {
     /// Reload document from disk
     pub fn reload_document(&mut self) -> anyhow::Result<()> {
         self.doc.reload()?;
-
-        // Clamp all pane cursors and scroll positions to new document length
-        let max_line = self.doc.line_count().saturating_sub(1);
-        for pane in self.panes.panes.values_mut() {
-            pane.view.cursor_line = pane.view.cursor_line.min(max_line);
-            pane.view.scroll_line = pane.view.scroll_line.min(max_line);
-        }
+        self.refresh_front_matter_info();
 
         // Request diff computation in background
         #[cfg(feature = "git")]
@@ -374,9 +418,10 @@ impl App {
 
     /// Move cursor down by n lines, skipping collapsed blocks
     pub fn move_cursor_down(&mut self, n: usize) {
+        let bounds = self.rendered_content_bounds();
         if let Some(pane) = self.panes.focused_pane_mut() {
-            let max_line = self.doc.line_count().saturating_sub(1);
-            pane.view.cursor_line = (pane.view.cursor_line + n).min(max_line);
+            let next_line = pane.view.cursor_line.saturating_add(n);
+            pane.view.cursor_line = next_line.clamp(bounds.0, bounds.1);
         }
         self.adjust_cursor_for_collapsed_blocks(true);
         self.update_selection();
@@ -384,8 +429,10 @@ impl App {
 
     /// Move cursor up by n lines, skipping collapsed blocks
     pub fn move_cursor_up(&mut self, n: usize) {
+        let bounds = self.rendered_content_bounds();
         if let Some(pane) = self.panes.focused_pane_mut() {
-            pane.view.cursor_line = pane.view.cursor_line.saturating_sub(n);
+            let prev_line = pane.view.cursor_line.saturating_sub(n);
+            pane.view.cursor_line = prev_line.clamp(bounds.0, bounds.1);
         }
         self.adjust_cursor_for_collapsed_blocks(false);
         self.update_selection();
@@ -394,6 +441,7 @@ impl App {
     /// Adjust cursor position if it lands inside a collapsed block
     /// moving_down: if true, cursor lands on the line after the collapsed block; if false, on the heading
     fn adjust_cursor_for_collapsed_blocks(&mut self, moving_down: bool) {
+        let bounds = self.rendered_content_bounds();
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
 
@@ -409,11 +457,11 @@ impl App {
             {
                 if moving_down {
                     // When moving down, jump to the line after the collapsed block
-                    pane.view.cursor_line =
-                        (range.end + 1).min(self.doc.line_count().saturating_sub(1));
+                    let target_line = range.end.saturating_add(1);
+                    pane.view.cursor_line = target_line.clamp(bounds.0, bounds.1);
                 } else {
                     // When moving up, jump to the heading line
-                    pane.view.cursor_line = range.start;
+                    pane.view.cursor_line = range.start.clamp(bounds.0, bounds.1);
                 }
             }
         }
@@ -421,9 +469,9 @@ impl App {
 
     /// Jump to specific line, expanding collapsed blocks if necessary
     pub fn jump_to_line(&mut self, line: usize) {
+        let bounds = self.rendered_content_bounds();
         if let Some(pane) = self.panes.focused_pane_mut() {
-            let max_line = self.doc.line_count().saturating_sub(1);
-            let target_line = line.min(max_line);
+            let target_line = line.clamp(bounds.0, bounds.1);
 
             // Expand ALL collapsed blocks that contain the target line
             // This handles nested collapsed headings (e.g., "## Parent" contains "### Child")
@@ -1114,8 +1162,9 @@ impl App {
         if !self.search_matches.is_empty() {
             self.search_current_match = Some(0);
             let first_match = self.search_matches[0];
+            let bounds = self.rendered_content_bounds();
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.cursor_line = first_match;
+                pane.view.cursor_line = first_match.clamp(bounds.0, bounds.1);
             }
         }
     }
@@ -1130,8 +1179,9 @@ impl App {
             let next_idx = (current_idx + 1) % self.search_matches.len();
             self.search_current_match = Some(next_idx);
             let match_line = self.search_matches[next_idx];
+            let bounds = self.rendered_content_bounds();
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.cursor_line = match_line;
+                pane.view.cursor_line = match_line.clamp(bounds.0, bounds.1);
             }
             self.auto_scroll(viewport_height);
         }
@@ -1151,8 +1201,9 @@ impl App {
             };
             self.search_current_match = Some(prev_idx);
             let match_line = self.search_matches[prev_idx];
+            let bounds = self.rendered_content_bounds();
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.cursor_line = match_line;
+                pane.view.cursor_line = match_line.clamp(bounds.0, bounds.1);
             }
             self.auto_scroll(viewport_height);
         }

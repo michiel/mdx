@@ -11,6 +11,7 @@ use crate::security::SecurityEvent;
 pub struct RenderConfig {
     pub use_utf8_graphics: bool,
     pub show_scrollbar: bool,
+    pub skip_front_matter: bool,
 }
 
 impl Default for RenderConfig {
@@ -18,6 +19,7 @@ impl Default for RenderConfig {
         Self {
             use_utf8_graphics: true,
             show_scrollbar: true,
+            skip_front_matter: true,
         }
     }
 }

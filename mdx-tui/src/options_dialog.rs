@@ -19,6 +19,7 @@ pub enum OptionField {
     NoExec,
     Utf8Graphics,
     ShowScrollbar,
+    SkipFrontMatter,
     #[cfg(feature = "watch")]
     WatchEnabled,
     #[cfg(feature = "watch")]
@@ -40,6 +41,7 @@ impl OptionField {
             OptionField::NoExec,
             OptionField::Utf8Graphics,
             OptionField::ShowScrollbar,
+            OptionField::SkipFrontMatter,
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled,
             #[cfg(feature = "watch")]
@@ -61,6 +63,7 @@ impl OptionField {
             OptionField::NoExec => "No Exec",
             OptionField::Utf8Graphics => "UTF-8 Graphics",
             OptionField::ShowScrollbar => "Show Scrollbar",
+            OptionField::SkipFrontMatter => "Skip Front Matter",
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => "File Watching",
             #[cfg(feature = "watch")]
@@ -149,6 +152,10 @@ impl OptionsDialog {
                 self.editing_config.render.show_scrollbar =
                     !self.editing_config.render.show_scrollbar;
             }
+            OptionField::SkipFrontMatter => {
+                self.editing_config.render.skip_front_matter =
+                    !self.editing_config.render.skip_front_matter;
+            }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => {
                 self.editing_config.watch.enabled = !self.editing_config.watch.enabled;
@@ -181,6 +188,9 @@ impl OptionsDialog {
             }
             OptionField::ShowScrollbar => {
                 format!("{}", self.editing_config.render.show_scrollbar)
+            }
+            OptionField::SkipFrontMatter => {
+                format!("{}", self.editing_config.render.skip_front_matter)
             }
             #[cfg(feature = "watch")]
             OptionField::WatchEnabled => format!("{}", self.editing_config.watch.enabled),

@@ -290,6 +290,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     };
 
     let line_count = app.doc.line_count();
+    let front_matter = app.front_matter;
 
     // If in raw mode, render plain text without markdown processing
     if pane.view.show_raw {
@@ -374,6 +375,18 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
     let mut line_idx = scroll;
     while line_idx < visible_end {
+        if let Some(fm) = front_matter {
+            if line_idx >= fm.start_line && line_idx <= fm.end_line {
+                let skip_to = (fm.end_line + 1).min(line_count);
+                let skipped = skip_to.saturating_sub(line_idx);
+                line_idx = skip_to;
+                if visible_end < line_count {
+                    visible_end = (visible_end + skipped).min(line_count);
+                }
+                continue;
+            }
+        }
+
         // Check if this line is the start of a collapsed range
         if let Some(range) = collapse::find_range_at_line(&collapsed_ranges, line_idx) {
             // Render collapsed summary
