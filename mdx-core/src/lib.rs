@@ -9,6 +9,7 @@
 
 pub mod config;
 pub mod doc;
+pub mod front_matter;
 pub mod security;
 pub mod selection;
 pub mod toc;
@@ -24,5 +25,6 @@ pub mod image;
 // Re-export commonly used types
 pub use config::Config;
 pub use doc::Document;
+pub use front_matter::{detect_front_matter, FrontMatter, FrontMatterKind};
 pub use security::{SecurityEvent, SecurityEventLevel};
 pub use selection::LineSelection;

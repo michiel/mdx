@@ -32,6 +32,7 @@ lru = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
+log = { workspace = true }
 
 # Clipboard (optional)
 arboard = { workspace = true, optional = true }

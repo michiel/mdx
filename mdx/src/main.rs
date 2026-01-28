@@ -37,6 +37,8 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    let _ = env_logger::try_init();
+
     let cli = Cli::parse();
 
     // Handle subcommands

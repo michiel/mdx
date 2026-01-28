@@ -1659,6 +1659,8 @@ fn handle_mouse_down(
             app.panes.focused = pane_id;
             app.toc_focus = false;
 
+            let bounds = app.rendered_content_bounds();
+
             if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
                 // Compute clicked line within pane
                 // Account for: top border (1), breadcrumb (1)
@@ -1667,11 +1669,8 @@ fn handle_mouse_down(
 
                 if y_in_pane >= content_y_offset {
                     let line_offset = (y_in_pane - content_y_offset) as usize;
-                    let clicked_line = pane.view.scroll_line + line_offset;
-
-                    // Clamp to valid line range
-                    let max_line = app.doc.rope.len_lines().saturating_sub(1);
-                    let clicked_line = clicked_line.min(max_line);
+                    let clicked_line =
+                        (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
 
                     pane.view.cursor_line = clicked_line;
 
@@ -1747,6 +1746,7 @@ fn handle_mouse_drag(
     layout: &LayoutInfo,
     _viewport_height: usize,
 ) -> Result<()> {
+    let bounds = app.rendered_content_bounds();
     match &app.mouse_state.clone() {
         MouseState::PendingSelection {
             pane_id,
@@ -1764,9 +1764,8 @@ fn handle_mouse_drag(
                     let y_in_pane = y.saturating_sub(rect.y);
                     if y_in_pane >= content_y_offset {
                         let line_offset = (y_in_pane - content_y_offset) as usize;
-                        let current_line = pane.view.scroll_line + line_offset;
-                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
-                        let current_line = current_line.min(max_line);
+                        let current_line =
+                            (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
 
                         pane.view.cursor_line = current_line;
                         if let Some(ref mut sel) = pane.view.selection {
@@ -1803,11 +1802,8 @@ fn handle_mouse_drag(
 
                     if y_in_pane >= content_y_offset {
                         let line_offset = (y_in_pane - content_y_offset) as usize;
-                        let current_line = pane.view.scroll_line + line_offset;
-
-                        // Clamp to valid range
-                        let max_line = app.doc.rope.len_lines().saturating_sub(1);
-                        let current_line = current_line.min(max_line);
+                        let current_line =
+                            (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
 
                         // Update cursor and selection
                         pane.view.cursor_line = current_line;

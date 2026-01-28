@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Detect and skip front matter (yaml/toml/json) when rendering, log an info message when material is skipped, and add the `render.skip_front_matter` config switch (toggleable via the options dialog).
+
 ## [0.2.1] - 2026-01-05
 
 ### Added
