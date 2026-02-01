@@ -33,15 +33,20 @@ pub fn handle_input(
         return Ok(Action::Continue);
     }
 
+    // Get pane viewport dimensions, refreshing layout context if stale
     let pane_viewport = app.focused_viewport();
-    let pane_height = pane_viewport
-        .map(|v| v.visible_height)
-        .filter(|&h| h > 0)
-        .unwrap_or(viewport_height);
-    let pane_width = pane_viewport
-        .map(|v| v.content_width)
-        .filter(|&w| w > 0)
-        .unwrap_or(viewport_width);
+    let (pane_height, pane_width) = if let Some(vp) = pane_viewport.filter(|v| v.visible_height > 0)
+    {
+        (vp.visible_height, vp.content_width)
+    } else {
+        // Layout context is stale or missing - refresh it
+        app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
+        // Try again after refresh
+        app.focused_viewport()
+            .filter(|v| v.visible_height > 0)
+            .map(|v| (v.visible_height, v.content_width))
+            .unwrap_or((viewport_height, viewport_width))
+    };
 
     if let Some(pane) = app.panes.focused_pane() {
         if pane.view.mode == crate::app::Mode::VisualLine
@@ -491,6 +496,8 @@ pub fn handle_input(
                 ..
             } => {
                 app.split_focused(SplitDir::Horizontal);
+                // Refresh layout context immediately so subsequent commands use correct pane sizes
+                app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
                 app.key_prefix = KeyPrefix::None;
                 return Ok(Action::Continue);
             }
@@ -502,6 +509,8 @@ pub fn handle_input(
                 ..
             } => {
                 app.split_focused(SplitDir::Vertical);
+                // Refresh layout context immediately so subsequent commands use correct pane sizes
+                app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
                 app.key_prefix = KeyPrefix::None;
                 return Ok(Action::Continue);
             }

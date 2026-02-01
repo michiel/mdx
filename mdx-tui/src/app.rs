@@ -289,9 +289,43 @@ impl App {
 
     fn enforce_rendered_bounds(&mut self) {
         let bounds = self.rendered_content_bounds();
-        for pane in self.panes.panes.values_mut() {
+        let line_count = self.doc.line_count();
+
+        // Get viewport heights for each pane from layout context
+        let pane_heights: std::collections::HashMap<PaneId, usize> = self
+            .panes
+            .panes
+            .keys()
+            .map(|&id| {
+                let height = self
+                    .layout_context
+                    .focused_viewport(id)
+                    .map(|v| v.visible_height)
+                    .filter(|&h| h > 0)
+                    .unwrap_or(20); // Reasonable default
+                (id, height)
+            })
+            .collect();
+
+        for (pane_id, pane) in self.panes.panes.iter_mut() {
+            // Clamp cursor to valid bounds
             pane.view.cursor_line = pane.view.cursor_line.clamp(bounds.0, bounds.1);
+
+            // Clamp scroll to valid bounds
             pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, bounds.1);
+
+            // Additional validation: ensure scroll_line doesn't leave viewport mostly empty
+            // The scroll should not go beyond (line_count - visible_height) unless document is smaller
+            let visible_height = pane_heights.get(pane_id).copied().unwrap_or(20);
+            if line_count > 0 {
+                let max_scroll = line_count.saturating_sub(1).max(bounds.0);
+                // If we'd show empty space at the bottom, scroll up
+                if pane.view.scroll_line + visible_height > line_count && line_count >= visible_height
+                {
+                    pane.view.scroll_line = line_count.saturating_sub(visible_height);
+                }
+                pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, max_scroll);
+            }
         }
     }
 
@@ -400,6 +434,12 @@ impl App {
         self.doc.reload()?;
         self.refresh_front_matter_info();
 
+        // Re-validate viewport positions after reload
+        // Use a reasonable default height; actual height from layout context
+        // will be used inside auto_scroll if available
+        let default_height = 20;
+        self.auto_scroll(default_height);
+
         // Request diff computation in background
         #[cfg(feature = "git")]
         if self.config.git.diff {
@@ -422,6 +462,15 @@ impl App {
         if let Some(pane) = self.panes.focused_pane_mut() {
             let next_line = pane.view.cursor_line.saturating_add(n);
             pane.view.cursor_line = next_line.clamp(bounds.0, bounds.1);
+
+            // Debug assertion: cursor should always be within bounds
+            debug_assert!(
+                pane.view.cursor_line >= bounds.0 && pane.view.cursor_line <= bounds.1,
+                "Cursor line {} out of bounds [{}, {}]",
+                pane.view.cursor_line,
+                bounds.0,
+                bounds.1
+            );
         }
         self.adjust_cursor_for_collapsed_blocks(true);
         self.update_selection();
@@ -433,6 +482,15 @@ impl App {
         if let Some(pane) = self.panes.focused_pane_mut() {
             let prev_line = pane.view.cursor_line.saturating_sub(n);
             pane.view.cursor_line = prev_line.clamp(bounds.0, bounds.1);
+
+            // Debug assertion: cursor should always be within bounds
+            debug_assert!(
+                pane.view.cursor_line >= bounds.0 && pane.view.cursor_line <= bounds.1,
+                "Cursor line {} out of bounds [{}, {}]",
+                pane.view.cursor_line,
+                bounds.0,
+                bounds.1
+            );
         }
         self.adjust_cursor_for_collapsed_blocks(false);
         self.update_selection();
@@ -516,8 +574,13 @@ impl App {
                 pane.view.cursor_line.saturating_sub(visual_lines)
             };
 
-            // Estimate content width (viewport width minus margins)
-            let content_width = viewport_width.saturating_sub(10); // Rough estimate for line numbers + gutters
+            // Use actual content width from layout context if available
+            // This accounts for split panes having smaller widths
+            let content_width = self
+                .focused_viewport()
+                .map(|v| v.content_width)
+                .filter(|&w| w > 0)
+                .unwrap_or_else(|| viewport_width.saturating_sub(10)); // Fallback estimate
 
             if content_width < 40 {
                 // Very narrow viewport, fallback to 1:1 mapping
@@ -581,7 +644,24 @@ impl App {
     }
 
     /// Auto-scroll viewport to keep cursor visible
+    ///
+    /// Uses the actual pane height from layout context when available,
+    /// falling back to the provided viewport_height parameter.
     pub fn auto_scroll(&mut self, viewport_height: usize) {
+        // Get actual pane height from layout context if available
+        let actual_height = self
+            .focused_viewport()
+            .map(|v| v.visible_height)
+            .filter(|&h| h > 0)
+            .unwrap_or(viewport_height);
+
+        // Debug assertion: height should be reasonable
+        debug_assert!(
+            actual_height > 0 && actual_height < 10000,
+            "auto_scroll: viewport height {} seems unreasonable",
+            actual_height
+        );
+
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
             let scroll = pane.view.scroll_line;
@@ -591,9 +671,19 @@ impl App {
                 pane.view.scroll_line = cursor;
             }
             // Cursor below viewport - scroll down
-            else if cursor >= scroll + viewport_height {
-                pane.view.scroll_line = cursor.saturating_sub(viewport_height - 1);
+            else if cursor >= scroll + actual_height {
+                pane.view.scroll_line = cursor.saturating_sub(actual_height.saturating_sub(1));
             }
+
+            // Debug assertion: after auto_scroll, cursor should be visible
+            debug_assert!(
+                pane.view.cursor_line >= pane.view.scroll_line
+                    && pane.view.cursor_line < pane.view.scroll_line + actual_height,
+                "auto_scroll: cursor {} not visible in viewport [{}, {})",
+                pane.view.cursor_line,
+                pane.view.scroll_line,
+                pane.view.scroll_line + actual_height
+            );
         }
     }
 
@@ -927,6 +1017,43 @@ impl App {
     /// Split the focused pane
     pub fn split_focused(&mut self, dir: crate::panes::SplitDir) {
         self.panes.split_focused(dir, 0); // doc_id is 0 for single document
+        // Note: layout_context will be stale after this.
+        // It will be refreshed on next draw() or via refresh_layout_context_with_area()
+    }
+
+    /// Refresh layout context with estimated area
+    ///
+    /// Call this when layout context may be stale (e.g., after splits)
+    /// and you need accurate viewport dimensions before the next draw.
+    pub fn refresh_layout_context_with_area(&mut self, viewport_width: u16, viewport_height: u16) {
+        use ratatui::layout::Rect;
+
+        // Estimate the pane area (accounting for status bar and TOC)
+        let status_bar_height = 1;
+        let toc_width = if self.show_toc {
+            self.config.toc.width as u16
+        } else {
+            0
+        };
+        let security_height = if !self.security_warnings.is_empty() && self.show_security_warnings {
+            4
+        } else {
+            0
+        };
+
+        let pane_area = Rect {
+            x: if self.show_toc && self.config.toc.side == mdx_core::config::TocSide::Left {
+                toc_width
+            } else {
+                0
+            },
+            y: 0,
+            width: viewport_width.saturating_sub(toc_width),
+            height: viewport_height.saturating_sub(status_bar_height + security_height),
+        };
+
+        let pane_layouts = self.panes.compute_layout(pane_area);
+        self.update_layout_context(&pane_layouts);
     }
 
     /// Enter visual line mode
