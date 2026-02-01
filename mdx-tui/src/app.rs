@@ -616,24 +616,31 @@ impl App {
 
     /// Auto-scroll viewport to keep cursor visible
     ///
-    /// Uses the actual pane height from layout context when available,
-    /// falling back to the provided viewport_height parameter.
-    ///
-    /// Note: In rendered mode, lines can wrap to multiple display rows, so we use
-    /// a conservative estimate (70%) of the visible height to ensure the cursor
-    /// stays visible even with wrapped lines.
+    /// Uses the actual pane dimensions from layout context when available.
+    /// Accounts for line wrapping by using a conservative height estimate that
+    /// varies based on pane width (narrower panes = more wrapping = smaller estimate).
     pub fn auto_scroll(&mut self, viewport_height: usize) {
-        // Get actual pane height from layout context if available
-        let actual_height = self
-            .focused_viewport()
+        // Get actual pane dimensions from layout context if available
+        let viewport = self.focused_viewport();
+        let actual_height = viewport
             .map(|v| v.visible_height)
             .filter(|&h| h > 0)
             .unwrap_or(viewport_height);
+        let content_width = viewport.map(|v| v.content_width).unwrap_or(80);
 
         // Use a conservative estimate to account for line wrapping in rendered mode.
-        // Lines can wrap to 2+ display rows, so assume only ~70% of lines fit.
-        // This ensures the cursor stays visible even with wrapped content.
-        let effective_height = (actual_height * 7 / 10).max(3);
+        // Narrower panes have more wrapping, so use a more aggressive reduction:
+        // - Wide pane (80+ chars): 70% of height
+        // - Medium pane (50-80 chars): 55% of height
+        // - Narrow pane (<50 chars): 40% of height
+        let wrap_factor = if content_width >= 80 {
+            70
+        } else if content_width >= 50 {
+            55
+        } else {
+            40
+        };
+        let effective_height = (actual_height * wrap_factor / 100).max(3);
 
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
