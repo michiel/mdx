@@ -289,43 +289,14 @@ impl App {
 
     fn enforce_rendered_bounds(&mut self) {
         let bounds = self.rendered_content_bounds();
-        let line_count = self.doc.line_count();
 
-        // Get viewport heights for each pane from layout context
-        let pane_heights: std::collections::HashMap<PaneId, usize> = self
-            .panes
-            .panes
-            .keys()
-            .map(|&id| {
-                let height = self
-                    .layout_context
-                    .focused_viewport(id)
-                    .map(|v| v.visible_height)
-                    .filter(|&h| h > 0)
-                    .unwrap_or(20); // Reasonable default
-                (id, height)
-            })
-            .collect();
-
-        for (pane_id, pane) in self.panes.panes.iter_mut() {
+        for pane in self.panes.panes.values_mut() {
             // Clamp cursor to valid bounds
             pane.view.cursor_line = pane.view.cursor_line.clamp(bounds.0, bounds.1);
 
-            // Clamp scroll to valid bounds
+            // Clamp scroll to valid bounds (but don't aggressively adjust to prevent empty space
+            // at the bottom - that would interfere with TOC jumps that want heading at top)
             pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, bounds.1);
-
-            // Additional validation: ensure scroll_line doesn't leave viewport mostly empty
-            // The scroll should not go beyond (line_count - visible_height) unless document is smaller
-            let visible_height = pane_heights.get(pane_id).copied().unwrap_or(20);
-            if line_count > 0 {
-                let max_scroll = line_count.saturating_sub(1).max(bounds.0);
-                // If we'd show empty space at the bottom, scroll up
-                if pane.view.scroll_line + visible_height > line_count && line_count >= visible_height
-                {
-                    pane.view.scroll_line = line_count.saturating_sub(visible_height);
-                }
-                pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, max_scroll);
-            }
         }
     }
 
