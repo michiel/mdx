@@ -616,31 +616,22 @@ impl App {
 
     /// Auto-scroll viewport to keep cursor visible
     ///
-    /// Uses the actual pane dimensions from layout context when available.
-    /// Accounts for line wrapping by using a conservative height estimate that
-    /// varies based on pane width (narrower panes = more wrapping = smaller estimate).
+    /// Uses a very conservative height estimate (40%) to account for line wrapping
+    /// in rendered markdown mode. Lines can wrap to 2-3x their original height,
+    /// so we assume only ~40% of display rows map to source lines.
     pub fn auto_scroll(&mut self, viewport_height: usize) {
-        // Get actual pane dimensions from layout context if available
-        let viewport = self.focused_viewport();
-        let actual_height = viewport
+        // Get actual pane height from layout context if available
+        let actual_height = self
+            .focused_viewport()
             .map(|v| v.visible_height)
             .filter(|&h| h > 0)
             .unwrap_or(viewport_height);
-        let content_width = viewport.map(|v| v.content_width).unwrap_or(80);
 
-        // Use a conservative estimate to account for line wrapping in rendered mode.
-        // Narrower panes have more wrapping, so use a more aggressive reduction:
-        // - Wide pane (80+ chars): 70% of height
-        // - Medium pane (50-80 chars): 55% of height
-        // - Narrow pane (<50 chars): 40% of height
-        let wrap_factor = if content_width >= 80 {
-            70
-        } else if content_width >= 50 {
-            55
-        } else {
-            40
-        };
-        let effective_height = (actual_height * wrap_factor / 100).max(3);
+        // Use a very conservative 40% estimate for line wrapping.
+        // In rendered mode, markdown bullets, long lines, and styling cause
+        // significant wrapping. 40% ensures the cursor stays visible even
+        // with heavy wrapping (e.g., narrow panes with TOC open).
+        let effective_height = (actual_height * 40 / 100).max(3);
 
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
@@ -650,7 +641,7 @@ impl App {
             if cursor < scroll {
                 pane.view.scroll_line = cursor;
             }
-            // Cursor below viewport - scroll down (use conservative height)
+            // Cursor below viewport - scroll down
             else if cursor >= scroll + effective_height {
                 pane.view.scroll_line = cursor.saturating_sub(effective_height.saturating_sub(1));
             }
@@ -1648,13 +1639,13 @@ mod tests {
         let mut app = App::new(config, doc, vec![]);
         let viewport_height = 10;
 
-        // Move cursor to line 15 (beyond effective viewport of 7 lines with 70% conservative estimate)
+        // Move cursor to line 15 (beyond effective viewport of 4 lines with 40% conservative estimate)
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 15;
         app.auto_scroll(viewport_height);
 
-        // Scroll should adjust so cursor is visible with conservative height
-        // effective_height = 10 * 70% = 7, so scroll = 15 - 6 = 9
-        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 9);
+        // Scroll should adjust so cursor is visible with very conservative height
+        // effective_height = 10 * 40% = 4, so scroll = 15 - 3 = 12
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 12);
     }
 
     #[test]

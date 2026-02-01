@@ -727,7 +727,16 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
     let mut wrapped_lines: Vec<Line> = Vec::new();
 
+    // Track visual line count to avoid generating more than display can show.
+    // When wrapped_lines.len() reaches content_height, stop adding more.
+    // This prevents Ratatui from truncating the bottom (where cursor may be).
+    let max_visual_lines = content_height;
+
     for (idx, line) in styled_lines.into_iter().enumerate() {
+        // Stop if we've filled the display
+        if wrapped_lines.len() >= max_visual_lines {
+            break;
+        }
         // Check if this is a table row - if so, don't wrap it
         let is_table_row = is_table_row_flags.get(idx).copied().unwrap_or(false);
 
@@ -794,6 +803,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 };
 
                 if should_wrap {
+                    if wrapped_lines.len() >= max_visual_lines {
+                        break; // Display full, stop wrapping
+                    }
                     wrapped_lines.push(Line::from(current_line_spans.clone()));
                     current_line_spans.clear();
                     current_width = 0;
@@ -880,6 +892,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
                         if !chunk.is_empty() {
                             current_line_spans.push(Span::styled(chunk.to_string(), span.style));
+                            if wrapped_lines.len() >= max_visual_lines {
+                                break; // Display full
+                            }
                             wrapped_lines.push(Line::from(current_line_spans.clone()));
                             current_line_spans.clear();
 
@@ -899,7 +914,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             prev_was_bullet = is_bullet_span;
         }
 
-        if !current_line_spans.is_empty() {
+        if !current_line_spans.is_empty() && wrapped_lines.len() < max_visual_lines {
             wrapped_lines.push(Line::from(current_line_spans));
         }
     }
