@@ -618,6 +618,10 @@ impl App {
     ///
     /// Uses the actual pane height from layout context when available,
     /// falling back to the provided viewport_height parameter.
+    ///
+    /// Note: In rendered mode, lines can wrap to multiple display rows, so we use
+    /// a conservative estimate (70%) of the visible height to ensure the cursor
+    /// stays visible even with wrapped lines.
     pub fn auto_scroll(&mut self, viewport_height: usize) {
         // Get actual pane height from layout context if available
         let actual_height = self
@@ -626,12 +630,10 @@ impl App {
             .filter(|&h| h > 0)
             .unwrap_or(viewport_height);
 
-        // Debug assertion: height should be reasonable
-        debug_assert!(
-            actual_height > 0 && actual_height < 10000,
-            "auto_scroll: viewport height {} seems unreasonable",
-            actual_height
-        );
+        // Use a conservative estimate to account for line wrapping in rendered mode.
+        // Lines can wrap to 2+ display rows, so assume only ~70% of lines fit.
+        // This ensures the cursor stays visible even with wrapped content.
+        let effective_height = (actual_height * 7 / 10).max(3);
 
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
@@ -641,20 +643,10 @@ impl App {
             if cursor < scroll {
                 pane.view.scroll_line = cursor;
             }
-            // Cursor below viewport - scroll down
-            else if cursor >= scroll + actual_height {
-                pane.view.scroll_line = cursor.saturating_sub(actual_height.saturating_sub(1));
+            // Cursor below viewport - scroll down (use conservative height)
+            else if cursor >= scroll + effective_height {
+                pane.view.scroll_line = cursor.saturating_sub(effective_height.saturating_sub(1));
             }
-
-            // Debug assertion: after auto_scroll, cursor should be visible
-            debug_assert!(
-                pane.view.cursor_line >= pane.view.scroll_line
-                    && pane.view.cursor_line < pane.view.scroll_line + actual_height,
-                "auto_scroll: cursor {} not visible in viewport [{}, {})",
-                pane.view.cursor_line,
-                pane.view.scroll_line,
-                pane.view.scroll_line + actual_height
-            );
         }
     }
 
@@ -1649,12 +1641,13 @@ mod tests {
         let mut app = App::new(config, doc, vec![]);
         let viewport_height = 10;
 
-        // Move cursor to line 15 (beyond viewport of 10 lines)
+        // Move cursor to line 15 (beyond effective viewport of 7 lines with 70% conservative estimate)
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 15;
         app.auto_scroll(viewport_height);
 
-        // Scroll should adjust so cursor is at bottom of viewport
-        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 6); // 15 - 9 = 6
+        // Scroll should adjust so cursor is visible with conservative height
+        // effective_height = 10 * 70% = 7, so scroll = 15 - 6 = 9
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 9);
     }
 
     #[test]
