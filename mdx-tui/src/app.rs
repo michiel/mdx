@@ -788,13 +788,35 @@ impl App {
     pub fn toc_jump_to_selected(&mut self) {
         if let Some(heading) = self.doc.headings.get(self.toc_selected) {
             let target_line = heading.line;
-            // Use jump_to_line to handle collapsed section expansion
-            self.jump_to_line(target_line);
-            // Set scroll to make heading the top line
+            let bounds = self.rendered_content_bounds();
+
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.scroll_line = target_line;
+                let clamped_target = target_line.clamp(bounds.0, bounds.1);
+
+                // Expand ALL collapsed blocks that contain the target line
+                loop {
+                    let collapsed_ranges = crate::collapse::compute_all_collapsed_ranges(
+                        &pane.view.collapsed_headings,
+                        &self.doc,
+                    );
+
+                    let containing_range = collapsed_ranges
+                        .iter()
+                        .find(|r| r.contains_line(clamped_target) || r.start == clamped_target);
+
+                    if let Some(range) = containing_range {
+                        pane.view.collapsed_headings.remove(&range.start);
+                    } else {
+                        break;
+                    }
+                }
+
+                // Set BOTH cursor and scroll in the same block to ensure consistency
+                pane.view.cursor_line = clamped_target;
+                pane.view.scroll_line = clamped_target;
             }
         }
+        self.update_selection();
     }
 
     /// Toggle TOC dialog
@@ -889,13 +911,35 @@ impl App {
     pub fn toc_dialog_jump_to_selected(&mut self) {
         if let Some(heading) = self.doc.headings.get(self.toc_dialog_selected) {
             let target_line = heading.line;
-            // Use jump_to_line to handle collapsed section expansion
-            self.jump_to_line(target_line);
-            // Set scroll to make heading the top line
+            let bounds = self.rendered_content_bounds();
+
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.scroll_line = target_line;
+                let clamped_target = target_line.clamp(bounds.0, bounds.1);
+
+                // Expand ALL collapsed blocks that contain the target line
+                loop {
+                    let collapsed_ranges = crate::collapse::compute_all_collapsed_ranges(
+                        &pane.view.collapsed_headings,
+                        &self.doc,
+                    );
+
+                    let containing_range = collapsed_ranges
+                        .iter()
+                        .find(|r| r.contains_line(clamped_target) || r.start == clamped_target);
+
+                    if let Some(range) = containing_range {
+                        pane.view.collapsed_headings.remove(&range.start);
+                    } else {
+                        break;
+                    }
+                }
+
+                // Set BOTH cursor and scroll in the same block to ensure consistency
+                pane.view.cursor_line = clamped_target;
+                pane.view.scroll_line = clamped_target;
             }
         }
+        self.update_selection();
         // Close the dialog
         self.show_toc_dialog = false;
     }
