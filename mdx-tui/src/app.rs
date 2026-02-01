@@ -627,11 +627,11 @@ impl App {
             .filter(|&h| h > 0)
             .unwrap_or(viewport_height);
 
-        // Use a very conservative 40% estimate for line wrapping.
+        // Use a very conservative 33% estimate for line wrapping.
         // In rendered mode, markdown bullets, long lines, and styling cause
-        // significant wrapping. 40% ensures the cursor stays visible even
-        // with heavy wrapping (e.g., narrow panes with TOC open).
-        let effective_height = (actual_height * 40 / 100).max(3);
+        // significant wrapping - often 2-3x the original line count.
+        // 33% ensures the cursor stays visible even with heavy wrapping.
+        let effective_height = (actual_height * 33 / 100).max(3);
 
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
@@ -1639,13 +1639,13 @@ mod tests {
         let mut app = App::new(config, doc, vec![]);
         let viewport_height = 10;
 
-        // Move cursor to line 15 (beyond effective viewport of 4 lines with 40% conservative estimate)
+        // Move cursor to line 15 (beyond effective viewport of 3 lines with 33% conservative estimate)
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 15;
         app.auto_scroll(viewport_height);
 
         // Scroll should adjust so cursor is visible with very conservative height
-        // effective_height = 10 * 40% = 4, so scroll = 15 - 3 = 12
-        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 12);
+        // effective_height = 10 * 33% = 3, so scroll = 15 - 2 = 13
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 13);
     }
 
     #[test]
