@@ -368,7 +368,8 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let mut styled_lines: Vec<Line> = Vec::new();
     let mut is_table_row_flags: Vec<bool> = Vec::new();
     let mut list_item_indents: Vec<Option<usize>> = Vec::new(); // Track list item continuation indent
-                                                                // Account for borders (top and bottom borders take 2 lines)
+    let mut cursor_styled_idx: Option<usize> = None; // Track which styled_lines index has the cursor
+                                                     // Account for borders (top and bottom borders take 2 lines)
     let content_height = content_area.height.saturating_sub(2) as usize;
     let mut visible_end = (scroll + content_height).min(line_count);
     let mut is_first_code_line = false;
@@ -401,6 +402,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 content_width,
             );
 
+            if is_cursor {
+                cursor_styled_idx = Some(styled_lines.len());
+            }
             styled_lines.push(summary_line);
             is_table_row_flags.push(false);
             list_item_indents.push(None);
@@ -707,6 +711,10 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             None
         };
 
+        // Track if this is the cursor line
+        if is_focused && line_idx == cursor {
+            cursor_styled_idx = Some(styled_lines.len());
+        }
         styled_lines.push(line);
         is_table_row_flags.push(is_table_row);
         list_item_indents.push(list_indent);
@@ -733,8 +741,9 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     let max_visual_lines = content_height;
 
     for (idx, line) in styled_lines.into_iter().enumerate() {
-        // Stop if we've filled the display
-        if wrapped_lines.len() >= max_visual_lines {
+        // Stop if we've filled the display, but always complete the cursor line
+        let is_cursor_line = cursor_styled_idx == Some(idx);
+        if wrapped_lines.len() >= max_visual_lines && !is_cursor_line {
             break;
         }
         // Check if this is a table row - if so, don't wrap it
@@ -803,8 +812,8 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
                 };
 
                 if should_wrap {
-                    if wrapped_lines.len() >= max_visual_lines {
-                        break; // Display full, stop wrapping
+                    if wrapped_lines.len() >= max_visual_lines && !is_cursor_line {
+                        break; // Display full, stop wrapping (but always complete cursor line)
                     }
                     wrapped_lines.push(Line::from(current_line_spans.clone()));
                     current_line_spans.clear();
@@ -892,8 +901,8 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
                         if !chunk.is_empty() {
                             current_line_spans.push(Span::styled(chunk.to_string(), span.style));
-                            if wrapped_lines.len() >= max_visual_lines {
-                                break; // Display full
+                            if wrapped_lines.len() >= max_visual_lines && !is_cursor_line {
+                                break; // Display full (but always complete cursor line)
                             }
                             wrapped_lines.push(Line::from(current_line_spans.clone()));
                             current_line_spans.clear();
@@ -914,7 +923,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
             prev_was_bullet = is_bullet_span;
         }
 
-        if !current_line_spans.is_empty() && wrapped_lines.len() < max_visual_lines {
+        if !current_line_spans.is_empty() && (wrapped_lines.len() < max_visual_lines || is_cursor_line) {
             wrapped_lines.push(Line::from(current_line_spans));
         }
     }
