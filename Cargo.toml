@@ -47,7 +47,7 @@ notify = "6.1"
 
 # Git diff
 similar = "2.6"
-gix = "0.76"
+gix = "0.78"
 bstr = "1.10"
 
 # Event bus
