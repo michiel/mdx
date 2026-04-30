@@ -15,6 +15,7 @@ pub mod input;
 pub mod options_dialog;
 pub mod panes;
 pub mod render;
+pub mod scroll_math;
 pub mod terminal;
 pub mod theme;
 pub mod ui;
@@ -50,13 +51,17 @@ pub fn run(mut app: App) -> Result<()> {
 }
 
 fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
+    use app::layout_const::{PANE_BORDER_COLS, PANE_BORDER_ROWS, STATUS_BAR_ROWS};
     loop {
-        // Get terminal size for viewport calculations
+        // Get terminal size for viewport calculations.
+        // Prefer the focused pane's visible_height (pane-aware); the values
+        // computed here are a fallback for code paths that haven't been
+        // migrated and for initial bootstrapping before a draw.
         let term_size = terminal.size()?;
-        // -1 for status bar, -2 for pane borders (top and bottom)
-        let viewport_height = term_size.height.saturating_sub(3) as usize;
-        // -2 for pane borders (left and right)
-        let viewport_width = term_size.width.saturating_sub(2) as usize;
+        let viewport_height = term_size
+            .height
+            .saturating_sub(STATUS_BAR_ROWS + PANE_BORDER_ROWS) as usize;
+        let viewport_width = term_size.width.saturating_sub(PANE_BORDER_COLS) as usize;
 
         // Draw UI
         terminal
@@ -68,9 +73,17 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
             break;
         }
 
-        // Poll for events with timeout
-        if crossterm::event::poll(Duration::from_millis(100)).context("Failed to poll events")? {
+        // Poll for events with timeout, then drain everything that is
+        // already queued up behind it so a key-held burst or fast wheel
+        // scroll does not visibly lag behind the input. Cap per tick to
+        // keep the UI responsive if something goes pathological.
+        const MAX_EVENTS_PER_TICK: usize = 32;
+        let mut drained = 0usize;
+        let mut had_event =
+            crossterm::event::poll(Duration::from_millis(100)).context("Failed to poll events")?;
+        while had_event && drained < MAX_EVENTS_PER_TICK {
             let event = crossterm::event::read().context("Failed to read event")?;
+            drained += 1;
             match event {
                 Event::Key(key) => {
                     // Only handle key press events, ignore release
@@ -121,6 +134,14 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                 _ => {
                     // Ignore other events (focus, paste, etc.)
                 }
+            }
+
+            // Peek without blocking; if more events are queued, drain them
+            // too (up to the cap) before we redraw.
+            had_event = crossterm::event::poll(Duration::from_millis(0))
+                .context("Failed to poll events")?;
+            if app.should_quit {
+                break;
             }
         }
 

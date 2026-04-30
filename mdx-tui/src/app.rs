@@ -72,6 +72,32 @@ impl ViewState {
     }
 }
 
+/// Named layout constants used throughout the TUI. Kept in one place so
+/// changes to the chrome (status bar, borders, breadcrumb) don't drift
+/// between callers.
+pub mod layout_const {
+    /// Bottom status bar height in rows.
+    pub const STATUS_BAR_ROWS: u16 = 1;
+    /// Per-pane border rows consumed top+bottom.
+    pub const PANE_BORDER_ROWS: u16 = 2;
+    /// Per-pane border columns consumed left+right.
+    pub const PANE_BORDER_COLS: u16 = 2;
+    /// Per-pane breadcrumb row (subtracted from the content area height).
+    pub const BREADCRUMB_ROWS: u16 = 1;
+    /// Width reserved for a scrollbar column when drawn.
+    pub const SCROLLBAR_COLS: u16 = 1;
+    /// Security banner height when visible.
+    pub const SECURITY_BANNER_ROWS: u16 = 4;
+    /// Fallback visible height used when no layout context is available.
+    pub const DEFAULT_FALLBACK_HEIGHT: usize = 20;
+    /// Below this content width, scroll math falls back to a 1:1 visual-to-
+    /// source mapping because the wrapping heuristic is not meaningful.
+    pub const MIN_WRAP_AWARE_WIDTH: usize = 40;
+    /// Hard lower bound before the app refuses to lay out panes.
+    pub const MIN_TERMINAL_COLS: u16 = 20;
+    pub const MIN_TERMINAL_ROWS: u16 = 5;
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PaneViewport {
     pub visible_height: usize,
@@ -110,12 +136,13 @@ impl LayoutContext {
 
 impl PaneViewport {
     fn from_rect(rect: Rect, doc_line_count: usize, show_scrollbar_flag: bool) -> Self {
-        let content_area_height = rect.height.saturating_sub(1);
-        let visible_height = content_area_height.saturating_sub(2) as usize;
-        let mut content_width = rect.width.saturating_sub(2);
+        let content_area_height = rect.height.saturating_sub(layout_const::BREADCRUMB_ROWS);
+        let visible_height =
+            content_area_height.saturating_sub(layout_const::PANE_BORDER_ROWS) as usize;
+        let mut content_width = rect.width.saturating_sub(layout_const::PANE_BORDER_COLS);
         let has_scrollbar = show_scrollbar_flag && doc_line_count > visible_height;
         if has_scrollbar {
-            content_width = content_width.saturating_sub(1);
+            content_width = content_width.saturating_sub(layout_const::SCROLLBAR_COLS);
         }
 
         Self {
@@ -124,6 +151,17 @@ impl PaneViewport {
         }
     }
 }
+
+/// One entry on the jump-back stack (Ctrl-O / Ctrl-I).
+#[derive(Debug, Clone, Copy)]
+pub struct JumpEntry {
+    pub pane: PaneId,
+    pub scroll_line: usize,
+    pub cursor_line: usize,
+}
+
+/// Maximum number of entries kept on the jump stack.
+pub const JUMP_STACK_CAP: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct CommandOutput {
@@ -151,6 +189,20 @@ pub struct App {
     pub toc_focus: bool,
     pub toc_selected: usize,
     pub toc_scroll: usize,
+    /// When true, the next `sync_toc_to_scroll` call is a no-op. Used to
+    /// suppress the feedback loop when a TOC click sets the scroll: the
+    /// scroll changed *because* the TOC moved, so re-selecting from the
+    /// new scroll would just echo back.
+    pub toc_tracking_suppress_once: bool,
+    /// Vim-style jump history for Ctrl-O / Ctrl-I. Each entry captures the
+    /// focused pane and its scroll/cursor position at the moment of a
+    /// *jump* (TOC click, search result, `G`/`gg`, goto-line). Ordinary
+    /// cursor movement does not push entries.
+    pub jump_stack: std::collections::VecDeque<JumpEntry>,
+    /// Index into `jump_stack` for the most recently "visited" entry. A
+    /// Ctrl-O pops back (decrements); Ctrl-I pushes forward (increments).
+    /// Equals `jump_stack.len()` when past the newest entry.
+    pub jump_cursor: usize,
     pub show_toc_dialog: bool,
     pub toc_dialog_selected: usize,
     pub toc_dialog_scroll: usize,
@@ -228,6 +280,9 @@ impl App {
             toc_focus: false,
             toc_selected: 0,
             toc_scroll: 0,
+            toc_tracking_suppress_once: false,
+            jump_stack: std::collections::VecDeque::new(),
+            jump_cursor: 0,
             show_toc_dialog: false,
             toc_dialog_selected: 0,
             toc_dialog_scroll: 0,
@@ -302,7 +357,7 @@ impl App {
                     .focused_viewport(id)
                     .map(|v| v.visible_height)
                     .filter(|&h| h > 0)
-                    .unwrap_or(20); // Reasonable default
+                    .unwrap_or(layout_const::DEFAULT_FALLBACK_HEIGHT);
                 (id, height)
             })
             .collect();
@@ -390,6 +445,10 @@ impl App {
             self.show_toc = self.config.toc.enabled;
         }
         self.options_dialog = None;
+        // Toggling the scrollbar or TOC changes per-pane content_width, which
+        // changes wrapping. Re-clamp so nothing is scrolled past the new end.
+        // The layout_context will be refreshed at the next draw.
+        self.enforce_rendered_bounds();
     }
 
     /// Save options to config file (Save button)
@@ -401,6 +460,7 @@ impl App {
             // Apply changes
             self.config = new_config;
             self.refresh_front_matter_info();
+            self.enforce_rendered_bounds();
             // Update theme if it changed
             if self.config.theme != self.theme_variant {
                 self.theme_variant = self.config.theme;
@@ -583,7 +643,7 @@ impl App {
         if content_width == 0 {
             return visual_lines;
         }
-        if content_width < 40 {
+        if content_width < layout_const::MIN_WRAP_AWARE_WIDTH {
             return visual_lines;
         }
 
@@ -641,7 +701,7 @@ impl App {
                 return visual_lines.max(1);
             }
 
-            if content_width < 40 {
+            if content_width < layout_const::MIN_WRAP_AWARE_WIDTH {
                 // Very narrow viewport, fallback to 1:1 mapping
                 return visual_lines;
             }
@@ -702,6 +762,126 @@ impl App {
         self.move_cursor_up(source_lines);
     }
 
+    /// Update `toc_selected` and `toc_scroll` to track the most recent
+    /// heading at or above the focused pane's scroll line.
+    ///
+    /// Skips the update once if `toc_tracking_suppress_once` is set — used
+    /// to prevent a feedback loop after the TOC itself moved the scroll.
+    pub fn sync_toc_to_scroll(&mut self) {
+        if self.toc_tracking_suppress_once {
+            self.toc_tracking_suppress_once = false;
+            return;
+        }
+        if self.doc.headings.is_empty() {
+            return;
+        }
+        let scroll_line = match self.panes.focused_pane() {
+            Some(p) => p.view.scroll_line,
+            None => return,
+        };
+        // Last heading with line <= scroll_line; if none, use first.
+        let idx = self
+            .doc
+            .headings
+            .iter()
+            .rposition(|h| h.line <= scroll_line)
+            .unwrap_or(0);
+        if idx != self.toc_selected {
+            self.toc_selected = idx;
+            // Best-effort scroll; if TOC is not open or viewport unknown,
+            // fall back to a reasonable window height.
+            let toc_height = self
+                .focused_viewport()
+                .map(|v| v.visible_height)
+                .filter(|&h| h > 0)
+                .unwrap_or(layout_const::DEFAULT_FALLBACK_HEIGHT);
+            self.toc_auto_scroll(toc_height);
+        }
+    }
+
+    /// Capture the current focused pane's scroll/cursor as a jump-stack
+    /// entry. Called *before* a jump (TOC click, search, G, gg, goto).
+    /// Truncates any forward history at the current cursor.
+    pub fn push_jump(&mut self) {
+        let Some(pane_id) = Some(self.panes.focused) else { return };
+        let Some(pane) = self.panes.focused_pane() else { return };
+        let entry = JumpEntry {
+            pane: pane_id,
+            scroll_line: pane.view.scroll_line,
+            cursor_line: pane.view.cursor_line,
+        };
+        // If we're not at the tip, drop everything past the cursor — new
+        // jumps always extend from the current position.
+        while self.jump_stack.len() > self.jump_cursor {
+            self.jump_stack.pop_back();
+        }
+        // Bound the stack; drop the oldest entry once at cap.
+        if self.jump_stack.len() >= JUMP_STACK_CAP {
+            self.jump_stack.pop_front();
+            self.jump_cursor = self.jump_cursor.saturating_sub(1);
+        }
+        self.jump_stack.push_back(entry);
+        self.jump_cursor = self.jump_stack.len();
+    }
+
+    /// Pop back to the previous jump position (Ctrl-O). Returns true if a
+    /// jump was applied.
+    pub fn jump_back(&mut self) -> bool {
+        if self.jump_cursor == 0 {
+            return false;
+        }
+        // If we are at the tip (jump_cursor == len()), record the current
+        // position first so Ctrl-I can return to it.
+        if self.jump_cursor == self.jump_stack.len() {
+            if let Some(pane) = self.panes.focused_pane() {
+                let entry = JumpEntry {
+                    pane: self.panes.focused,
+                    scroll_line: pane.view.scroll_line,
+                    cursor_line: pane.view.cursor_line,
+                };
+                if self.jump_stack.len() >= JUMP_STACK_CAP {
+                    self.jump_stack.pop_front();
+                    self.jump_cursor = self.jump_cursor.saturating_sub(1);
+                }
+                self.jump_stack.push_back(entry);
+                // jump_cursor stays where it is — we're adding the "tip"
+                // marker past the most recent real jump.
+            }
+        }
+        self.jump_cursor -= 1;
+        self.apply_jump_at_cursor();
+        true
+    }
+
+    /// Move forward in the jump stack (Ctrl-I). Returns true if a jump
+    /// was applied.
+    pub fn jump_forward(&mut self) -> bool {
+        if self.jump_cursor + 1 >= self.jump_stack.len() {
+            return false;
+        }
+        self.jump_cursor += 1;
+        self.apply_jump_at_cursor();
+        true
+    }
+
+    fn apply_jump_at_cursor(&mut self) {
+        let Some(entry) = self.jump_stack.get(self.jump_cursor).copied() else { return };
+        // Restore focus and position. If the pane was removed (after a
+        // split close) fall back to the currently focused pane.
+        if self.panes.panes.contains_key(&entry.pane) {
+            self.panes.focused = entry.pane;
+        }
+        if let Some(pane) = self.panes.focused_pane_mut() {
+            pane.view.scroll_line = entry.scroll_line;
+            pane.view.cursor_line = entry.cursor_line;
+        }
+        // Re-clamp in case the doc length or layout changed since the
+        // entry was recorded.
+        self.enforce_rendered_bounds();
+        // Don't let TOC tracking re-echo from the restored scroll.
+        self.toc_tracking_suppress_once = true;
+    }
+
     /// Auto-scroll viewport to keep cursor visible
     ///
     /// Uses the actual pane height from layout context when available,
@@ -744,6 +924,7 @@ impl App {
                 pane.view.scroll_line + actual_height
             );
         }
+        self.sync_toc_to_scroll();
     }
 
     /// Toggle between dark and light themes
@@ -853,6 +1034,9 @@ impl App {
             if let Some(pane) = self.panes.focused_pane_mut() {
                 pane.view.scroll_line = target_line;
             }
+            // Suppress the next TOC-tracking update; the scroll moved
+            // *because* of this TOC click, so re-selecting would echo.
+            self.toc_tracking_suppress_once = true;
         }
     }
 

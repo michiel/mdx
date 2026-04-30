@@ -12,6 +12,13 @@ pub struct RenderConfig {
     pub use_utf8_graphics: bool,
     pub show_scrollbar: bool,
     pub skip_front_matter: bool,
+    /// Number of visual rows preserved between pages when using PgUp/PgDn.
+    /// 2 matches less/vim. Clamped to [0, page_height/2] at use time.
+    pub page_overlap_rows: usize,
+    /// When true and the viewport has scrolled past the heading of the
+    /// current section, the active heading is pinned to the first content
+    /// row of the pane.
+    pub sticky_heading: bool,
 }
 
 impl Default for RenderConfig {
@@ -20,6 +27,8 @@ impl Default for RenderConfig {
             use_utf8_graphics: true,
             show_scrollbar: true,
             skip_front_matter: true,
+            page_overlap_rows: 2,
+            sticky_heading: false,
         }
     }
 }

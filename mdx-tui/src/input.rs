@@ -121,6 +121,32 @@ pub fn handle_input(
         return Ok(Action::Redraw);
     }
 
+    // Ctrl+O - jump back in jump stack
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('o'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        app.jump_back();
+        return Ok(Action::Continue);
+    }
+
+    // Ctrl+I - jump forward in jump stack (Tab shares this code in terminals)
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('i'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        app.jump_forward();
+        return Ok(Action::Continue);
+    }
+
     // Handle Ctrl+Shift+C - copy selection to clipboard
     if key.code == KeyCode::Char('C')
         && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -457,6 +483,7 @@ pub fn handle_input(
                 code: KeyCode::Enter,
                 ..
             } => {
+                app.push_jump();
                 app.toc_dialog_jump_to_selected();
                 return Ok(Action::Continue);
             }
@@ -942,6 +969,7 @@ pub fn handle_input(
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
+                app.push_jump();
                 app.toc_jump_to_selected();
                 app.toc_focus = false; // Return focus to document
                 return Ok(Action::Continue);
@@ -1105,6 +1133,7 @@ pub fn handle_input(
             ..
         }
     ) {
+        app.push_jump();
         app.next_search_match(pane_height);
         return Ok(Action::Continue);
     }
@@ -1118,6 +1147,7 @@ pub fn handle_input(
             ..
         }
     ) {
+        app.push_jump();
         app.prev_search_match(pane_height);
         return Ok(Action::Continue);
     }
@@ -1369,6 +1399,7 @@ pub fn handle_input(
             ..
         } => {
             // For now, implement gg as single 'g' (proper prefix state in later enhancement)
+            app.push_jump();
             app.jump_to_line(0);
             app.auto_scroll(pane_height);
         }
@@ -1380,6 +1411,7 @@ pub fn handle_input(
             ..
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
+            app.push_jump();
             app.jump_to_line(last_line);
             app.auto_scroll(pane_height);
         }
@@ -1426,12 +1458,13 @@ pub fn handle_input(
             }
         }
 
-        // PageDown/PageUp - scroll by full page
+        // PageDown/PageUp - scroll by full page (minus overlap)
         KeyEvent {
             code: KeyCode::PageDown,
             ..
         } => {
-            app.move_cursor_down(pane_height);
+            let step = page_step(app, pane_height);
+            app.move_cursor_down(step);
             app.auto_scroll(pane_height);
         }
 
@@ -1439,7 +1472,8 @@ pub fn handle_input(
             code: KeyCode::PageUp,
             ..
         } => {
-            app.move_cursor_up(pane_height);
+            let step = page_step(app, pane_height);
+            app.move_cursor_up(step);
             app.auto_scroll(pane_height);
         }
 
@@ -1449,7 +1483,8 @@ pub fn handle_input(
             modifiers: KeyModifiers::NONE,
             ..
         } => {
-            app.move_cursor_down(pane_height);
+            let step = page_step(app, pane_height);
+            app.move_cursor_down(step);
             app.auto_scroll(pane_height);
         }
 
@@ -1458,6 +1493,7 @@ pub fn handle_input(
             code: KeyCode::Home,
             ..
         } => {
+            app.push_jump();
             app.jump_to_line(0);
             app.auto_scroll(pane_height);
         }
@@ -1466,6 +1502,7 @@ pub fn handle_input(
             code: KeyCode::End, ..
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
+            app.push_jump();
             app.jump_to_line(last_line);
             app.auto_scroll(pane_height);
         }
@@ -1714,6 +1751,7 @@ fn handle_mouse_down(
                 if clicked_row < app.doc.headings.len() {
                     app.toc_selected = clicked_row;
                     // Jump to the selected heading in the focused pane
+                    app.push_jump();
                     app.toc_jump_to_selected();
                     // Restore TOC focus (toc_jump_to_selected doesn't change focus, but we ensure it)
                     app.toc_focus = true;
@@ -1891,6 +1929,14 @@ fn handle_mouse_up(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// How many source lines a PgDn/PgUp should move: the focused pane's
+/// visible height minus the configured overlap, clamped so that pages
+/// always advance by at least one line. Delegates to `scroll_math` so the
+/// rule stays testable.
+fn page_step(app: &App, pane_height: usize) -> usize {
+    crate::scroll_math::page_step(pane_height, app.config.render.page_overlap_rows)
+}
+
 /// Handle scroll wheel event
 fn handle_scroll(
     app: &mut App,
@@ -1951,23 +1997,27 @@ fn handle_scroll(
             );
 
             if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
-                let new_scroll = if delta > 0 {
-                    pane.view.scroll_line.saturating_add(source_step)
-                } else {
-                    pane.view.scroll_line.saturating_sub(source_step)
-                };
-                pane.view.scroll_line = new_scroll.clamp(bounds_lo, max_scroll.max(bounds_lo));
-
+                pane.view.scroll_line = crate::scroll_math::advance_scroll(
+                    pane.view.scroll_line,
+                    source_step,
+                    delta > 0,
+                    bounds_lo,
+                    bounds_hi,
+                    doc_lines,
+                    visible_lines,
+                );
                 // Keep cursor within the visible window so a later keystroke
                 // does not jerk the viewport back.
-                let top = pane.view.scroll_line;
-                let bot = top.saturating_add(visible_lines.saturating_sub(1));
-                if pane.view.cursor_line < top {
-                    pane.view.cursor_line = top.min(bounds_hi);
-                } else if pane.view.cursor_line > bot {
-                    pane.view.cursor_line = bot.min(bounds_hi);
-                }
+                pane.view.cursor_line = crate::scroll_math::snap_cursor_into_view(
+                    pane.view.cursor_line,
+                    pane.view.scroll_line,
+                    visible_lines,
+                    bounds_lo,
+                    bounds_hi,
+                );
+                let _ = max_scroll; // retained only to mirror review invariant
             }
+            app.sync_toc_to_scroll();
         }
         _ => {
             // Ignore scroll on other areas
