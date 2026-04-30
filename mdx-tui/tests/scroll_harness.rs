@@ -302,6 +302,44 @@ fn harness_search_next_centers_match_in_viewport() {
 }
 
 #[test]
+fn harness_deep_split_drag_does_not_panic_and_clamps() {
+    // Creates a 3-deep nested split tree and drags inner splits. The
+    // root-split coverage in harness_split_drag_reclamps_scroll_in_narrowed_pane
+    // misses the recursive path through `update_split_ratio_recursive`.
+    let content = make_long_doc(400);
+    let (mut app, _f) = new_app_with(&content);
+
+    // Split once, then split the new pane, then split again — this produces
+    // a tree with nested paths like [1] and [1, 1].
+    app.split_focused(mdx_tui::panes::SplitDir::Horizontal);
+    app.split_focused(mdx_tui::panes::SplitDir::Vertical);
+    app.split_focused(mdx_tui::panes::SplitDir::Horizontal);
+    assert_eq!(app.panes.panes.len(), 4);
+
+    // Jump to end in the focused (deepest) pane.
+    let last = app.doc.line_count().saturating_sub(1);
+    app.jump_to_line(last);
+    app.auto_scroll(20);
+    let cursor_before = focused_cursor(&app);
+    assert_eq!(cursor_before, last);
+
+    // Drag the innermost split to the floor.
+    let _ = app.panes.update_split_ratio(&[1, 1], 0.1);
+    app.enforce_rendered_bounds();
+    assert!(focused_scroll(&app) <= last);
+    assert!(focused_cursor(&app) <= last);
+
+    // Drag an outer split at a different depth.
+    let _ = app.panes.update_split_ratio(&[1], 0.9);
+    app.enforce_rendered_bounds();
+    assert!(focused_scroll(&app) <= last);
+    assert!(focused_cursor(&app) <= last);
+
+    // Bogus path — must return false, never panic.
+    assert!(!app.panes.update_split_ratio(&[99, 99], 0.5));
+}
+
+#[test]
 fn harness_empty_doc_is_not_panicking_on_pgdn_resize() {
     // Degenerate inputs should not panic.
     let (mut app, _f) = new_app_with("");

@@ -2,7 +2,7 @@
 
 use crate::panes::{PaneId, PaneManager};
 use crate::theme::Theme;
-use log::info;
+use log::{info, trace};
 use mdx_core::{
     config::ThemeVariant, detect_front_matter, Config, Document, FrontMatter, LineSelection,
 };
@@ -358,7 +358,7 @@ impl App {
         app
     }
 
-    fn refresh_front_matter_info(&mut self) {
+    pub fn refresh_front_matter_info(&mut self) {
         if self.config.render.skip_front_matter {
             self.front_matter = detect_front_matter(&self.doc.rope);
             if let Some(fm) = self.front_matter {
@@ -410,6 +410,9 @@ impl App {
             .collect();
 
         for (pane_id, pane) in self.panes.panes.iter_mut() {
+            let prev_cursor = pane.view.cursor_line;
+            let prev_scroll = pane.view.scroll_line;
+
             // Clamp cursor to valid bounds
             pane.view.cursor_line = pane.view.cursor_line.clamp(bounds.0, bounds.1);
 
@@ -427,6 +430,17 @@ impl App {
                     pane.view.scroll_line = line_count.saturating_sub(visible_height);
                 }
                 pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, max_scroll);
+            }
+
+            if prev_cursor != pane.view.cursor_line || prev_scroll != pane.view.scroll_line {
+                trace!(
+                    target: "mdx::scroll",
+                    "enforce_bounds: pane={:?} cursor {}->{} scroll {}->{} bounds={:?}",
+                    pane_id,
+                    prev_cursor, pane.view.cursor_line,
+                    prev_scroll, pane.view.scroll_line,
+                    bounds
+                );
             }
         }
     }
@@ -737,6 +751,12 @@ impl App {
         self.enforce_rendered_bounds();
         self.update_selection();
         self.sync_toc_to_scroll();
+
+        trace!(
+            target: "mdx::scroll",
+            "goto: pane={:?} policy={:?} prev_cursor={} prev_scroll={} -> cursor={} scroll={}",
+            pane, policy, prev_cursor, prev_scroll, clamped_target, new_scroll
+        );
     }
 
     pub fn visual_delta_to_source_lines(
@@ -1002,6 +1022,14 @@ impl App {
             // Cursor below viewport - scroll down
             else if cursor >= scroll + actual_height {
                 pane.view.scroll_line = cursor.saturating_sub(actual_height.saturating_sub(1));
+            }
+
+            if pane.view.scroll_line != scroll {
+                trace!(
+                    target: "mdx::scroll",
+                    "auto_scroll: cursor={} height={} scroll {} -> {}",
+                    cursor, actual_height, scroll, pane.view.scroll_line
+                );
             }
 
             // Debug assertion: after auto_scroll, cursor should be visible
