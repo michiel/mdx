@@ -287,7 +287,7 @@ impl App {
         }
     }
 
-    fn enforce_rendered_bounds(&mut self) {
+    pub fn enforce_rendered_bounds(&mut self) {
         let bounds = self.rendered_content_bounds();
         let line_count = self.doc.line_count();
 
@@ -559,6 +559,60 @@ impl App {
         self.update_selection();
     }
 
+    /// Walk the rope from `start_line` by approximately `visual_lines`
+    /// rendered rows and return the number of source lines spanned.
+    ///
+    /// Shared wrapping heuristic used by both keyboard half-page scroll
+    /// (relative to cursor) and mouse-wheel scroll (relative to viewport top),
+    /// so the two input paths cover comparable visual distances on wrapped
+    /// content.
+    pub fn visual_delta_to_source_lines(
+        &self,
+        start_line: usize,
+        visual_lines: usize,
+        content_width: usize,
+        forward: bool,
+    ) -> usize {
+        if visual_lines == 0 {
+            return 0;
+        }
+        let line_count = self.doc.line_count();
+        if line_count == 0 {
+            return 0;
+        }
+        if content_width == 0 {
+            return visual_lines;
+        }
+        if content_width < 40 {
+            return visual_lines;
+        }
+
+        let mut visual_count = 0usize;
+        let mut source_count = 0usize;
+        while visual_count < visual_lines {
+            let line_idx = if forward {
+                start_line.saturating_add(source_count)
+            } else {
+                match start_line.checked_sub(source_count + 1) {
+                    Some(idx) => idx,
+                    None => break,
+                }
+            };
+            if line_idx >= line_count {
+                break;
+            }
+            let line_len = self.doc.rope.line(line_idx).len_chars();
+            let wrapped = if line_len == 0 {
+                1
+            } else {
+                ((line_len + content_width - 1) / content_width).max(1)
+            };
+            visual_count = visual_count.saturating_add(wrapped);
+            source_count = source_count.saturating_add(1);
+        }
+        source_count.max(1)
+    }
+
     /// Calculate how many source lines to move for a given visual line count
     /// This accounts for line wrapping by estimating wrapped lines
     fn calculate_source_lines_for_visual_lines(
@@ -581,6 +635,11 @@ impl App {
                 .map(|v| v.content_width)
                 .filter(|&w| w > 0)
                 .unwrap_or_else(|| viewport_width.saturating_sub(10)); // Fallback estimate
+
+            if content_width == 0 {
+                // Degenerate viewport — avoid div-by-zero below
+                return visual_lines.max(1);
+            }
 
             if content_width < 40 {
                 // Very narrow viewport, fallback to 1:1 mapping
@@ -1054,6 +1113,28 @@ impl App {
 
         let pane_layouts = self.panes.compute_layout(pane_area);
         self.update_layout_context(&pane_layouts);
+    }
+
+    /// Handle a terminal resize event.
+    ///
+    /// Refreshes the layout context for the new dimensions and re-clamps
+    /// all pane scroll/cursor positions and TOC scroll offsets so nothing
+    /// remains pointing past the end of the new viewport. Called from the
+    /// main loop on `Event::Resize`.
+    pub fn on_resize(&mut self, width: u16, height: u16) {
+        self.refresh_layout_context_with_area(width, height);
+        self.enforce_rendered_bounds();
+
+        // Clamp TOC scroll offsets to the new heading count / window.
+        let heading_count = self.doc.headings.len();
+        if heading_count == 0 {
+            self.toc_scroll = 0;
+            self.toc_dialog_scroll = 0;
+        } else {
+            let max_idx = heading_count.saturating_sub(1);
+            self.toc_scroll = self.toc_scroll.min(max_idx);
+            self.toc_dialog_scroll = self.toc_dialog_scroll.min(max_idx);
+        }
     }
 
     /// Enter visual line mode

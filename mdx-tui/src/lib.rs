@@ -112,8 +112,14 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                 Event::Mouse(mouse_event) => {
                     input::handle_mouse(app, mouse_event, viewport_height, viewport_width)?;
                 }
+                Event::Resize(width, height) => {
+                    app.on_resize(width, height);
+                    // Force a clean redraw so any stale cells from the prior
+                    // geometry are cleared.
+                    terminal.clear().context("Failed to clear terminal on resize")?;
+                }
                 _ => {
-                    // Ignore other events (resize, focus, etc.)
+                    // Ignore other events (focus, paste, etc.)
                 }
             }
         }

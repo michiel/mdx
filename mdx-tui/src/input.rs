@@ -1854,6 +1854,10 @@ fn handle_mouse_drag(
 
                 // Update the split ratio (will be clamped in update_split_ratio)
                 app.panes.update_split_ratio(split_path, new_ratio);
+                // Ratio change narrows/widens sibling panes, which changes
+                // their wrapping. Re-clamp scroll/cursor so neither pane ends
+                // up scrolled past its new end-of-content.
+                app.enforce_rendered_bounds();
             }
         }
         MouseState::Idle => {
@@ -1916,24 +1920,53 @@ fn handle_scroll(
             // Don't change toc_selected or focus
         }
         HitTarget::Pane(pane_id, rect) => {
-            // Scroll pane content without moving cursor
+            // Scroll pane content. `delta` is a visual-row count; convert to
+            // source-line steps that account for line wrapping so the wheel
+            // and the keyboard move the viewport by comparable amounts.
             let visible_lines = rect.height.saturating_sub(3) as usize; // -3 for borders + breadcrumb
             let doc_lines = app.doc.rope.len_lines();
-            let max_scroll = doc_lines.saturating_sub(visible_lines);
+            let content_width = app
+                .layout_context
+                .focused_viewport(pane_id)
+                .map(|v| v.content_width)
+                .filter(|&w| w > 0)
+                .unwrap_or_else(|| rect.width.saturating_sub(2) as usize);
+
+            let (bounds_lo, bounds_hi) = app.rendered_content_bounds();
+            // Leave at least one row of content visible at the end.
+            let max_scroll = doc_lines.saturating_sub(visible_lines).max(bounds_lo);
+
+            let delta_visual = delta.unsigned_abs() as usize;
+            let start_scroll = app
+                .panes
+                .panes
+                .get(&pane_id)
+                .map(|p| p.view.scroll_line)
+                .unwrap_or(bounds_lo);
+            let source_step = app.visual_delta_to_source_lines(
+                start_scroll,
+                delta_visual,
+                content_width,
+                delta > 0,
+            );
 
             if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
-                // Apply scroll delta
-                if delta > 0 {
-                    // Scroll down
-                    pane.view.scroll_line =
-                        (pane.view.scroll_line + delta as usize).min(max_scroll);
+                let new_scroll = if delta > 0 {
+                    pane.view.scroll_line.saturating_add(source_step)
                 } else {
-                    // Scroll up
-                    pane.view.scroll_line = pane.view.scroll_line.saturating_sub((-delta) as usize);
-                }
+                    pane.view.scroll_line.saturating_sub(source_step)
+                };
+                pane.view.scroll_line = new_scroll.clamp(bounds_lo, max_scroll.max(bounds_lo));
 
-                // Don't move cursor - this is different from keyboard scrolling
-                // Cursor stays at its current line, which may scroll out of view
+                // Keep cursor within the visible window so a later keystroke
+                // does not jerk the viewport back.
+                let top = pane.view.scroll_line;
+                let bot = top.saturating_add(visible_lines.saturating_sub(1));
+                if pane.view.cursor_line < top {
+                    pane.view.cursor_line = top.min(bounds_hi);
+                } else if pane.view.cursor_line > bot {
+                    pane.view.cursor_line = bot.min(bounds_hi);
+                }
             }
         }
         _ => {
