@@ -87,6 +87,82 @@ pub fn snap_cursor_into_view(
     clamp_cursor(clamped, bounds_lo, bounds_hi)
 }
 
+/// How to position the viewport relative to a new cursor target when
+/// `goto()`-style navigation runs. See `App::goto` for the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollPolicy {
+    /// Minimal movement: if the cursor is already visible, keep the
+    /// viewport where it is; otherwise snap it to the nearest edge.
+    /// Same behaviour `auto_scroll_to_cursor` has always had.
+    NearestEdge,
+    /// Center the cursor in the viewport (vim `zz`).
+    Center,
+    /// Place the cursor near the top of the viewport, with roughly a
+    /// quarter of the viewport above it (vim `zt` leaves 0 rows above;
+    /// this policy intentionally keeps a little context).
+    TopQuarter,
+    /// Keep the cursor at the same row offset within the viewport it
+    /// previously occupied. Falls back to NearestEdge when the prior
+    /// cursor was not inside the viewport.
+    KeepOffset,
+}
+
+/// Compute the new scroll position after moving the cursor to
+/// `new_cursor`, given the previous cursor/scroll and the policy.
+pub fn scroll_for_policy(
+    new_cursor: usize,
+    prev_cursor: usize,
+    scroll_line: usize,
+    visible_height: usize,
+    bounds_lo: usize,
+    bounds_hi: usize,
+    line_count: usize,
+    policy: ScrollPolicy,
+) -> usize {
+    if visible_height == 0 {
+        return scroll_line;
+    }
+    let new_scroll = match policy {
+        ScrollPolicy::NearestEdge => {
+            return auto_scroll_to_cursor(
+                new_cursor,
+                scroll_line,
+                visible_height,
+                bounds_lo,
+                bounds_hi,
+                line_count,
+            );
+        }
+        ScrollPolicy::Center => {
+            let half = visible_height / 2;
+            new_cursor.saturating_sub(half)
+        }
+        ScrollPolicy::TopQuarter => {
+            let quarter = visible_height / 4;
+            new_cursor.saturating_sub(quarter)
+        }
+        ScrollPolicy::KeepOffset => {
+            let top = scroll_line;
+            let bot = scroll_line.saturating_add(visible_height.saturating_sub(1));
+            if prev_cursor >= top && prev_cursor <= bot {
+                let offset = prev_cursor - top;
+                new_cursor.saturating_sub(offset)
+            } else {
+                // Fallback: treat as NearestEdge.
+                return auto_scroll_to_cursor(
+                    new_cursor,
+                    scroll_line,
+                    visible_height,
+                    bounds_lo,
+                    bounds_hi,
+                    line_count,
+                );
+            }
+        }
+    };
+    clamp_scroll(new_scroll, bounds_lo, bounds_hi, line_count, visible_height)
+}
+
 /// If the cursor is outside the viewport, move the viewport so the cursor
 /// sits at the nearest edge. Used by keyboard paths where we want the
 /// viewport to follow the cursor rather than the other way around.
@@ -275,6 +351,59 @@ mod tests {
         // cursor at last line; scroll would go to 99 - 19 = 80, which is
         // the clamp_scroll "keep viewport full" cap — same value.
         assert_eq!(auto_scroll_to_cursor(99, 0, 20, 0, 99, 100), 80);
+    }
+
+    // --- scroll_for_policy -----------------------------------------------
+
+    #[test]
+    fn policy_center_places_cursor_near_middle() {
+        // 100-line doc, 20 visible, target line 50. Center → scroll 40.
+        let s = scroll_for_policy(50, 0, 0, 20, 0, 99, 100, ScrollPolicy::Center);
+        assert_eq!(s, 40);
+    }
+
+    #[test]
+    fn policy_top_quarter_places_cursor_near_top() {
+        // 20 visible, quarter = 5. target 50 → scroll 45.
+        let s = scroll_for_policy(50, 0, 0, 20, 0, 99, 100, ScrollPolicy::TopQuarter);
+        assert_eq!(s, 45);
+    }
+
+    #[test]
+    fn policy_keep_offset_preserves_relative_position() {
+        // prev_cursor=35, scroll=30 → offset=5. new_cursor=70 → scroll=65.
+        let s = scroll_for_policy(70, 35, 30, 20, 0, 199, 200, ScrollPolicy::KeepOffset);
+        assert_eq!(s, 65);
+    }
+
+    #[test]
+    fn policy_keep_offset_falls_back_when_prev_invisible() {
+        // prev_cursor=5, scroll=30 — prev was above viewport.
+        // Behaves like NearestEdge.
+        let s = scroll_for_policy(70, 5, 30, 20, 0, 199, 200, ScrollPolicy::KeepOffset);
+        assert_eq!(s, 51); // 70 - 19 = 51 (cursor at bottom edge)
+    }
+
+    #[test]
+    fn policy_nearest_edge_matches_auto_scroll() {
+        // Should produce identical output to auto_scroll_to_cursor.
+        let a = auto_scroll_to_cursor(80, 30, 20, 0, 99, 100);
+        let b = scroll_for_policy(80, 0, 30, 20, 0, 99, 100, ScrollPolicy::NearestEdge);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn policy_center_clamps_at_doc_start() {
+        // target 2, visible 20. Half = 10. cursor - half saturates to 0.
+        let s = scroll_for_policy(2, 0, 0, 20, 0, 99, 100, ScrollPolicy::Center);
+        assert_eq!(s, 0);
+    }
+
+    #[test]
+    fn policy_center_clamps_at_doc_end() {
+        // target 99, visible 20, half=10 → 89. But clamp_scroll caps at 80.
+        let s = scroll_for_policy(99, 0, 0, 20, 0, 99, 100, ScrollPolicy::Center);
+        assert_eq!(s, 80);
     }
 
     // --- Table-driven test matrix mirroring review.md §6 -----------------

@@ -12,6 +12,7 @@ pub mod collapse;
 pub mod editor;
 pub mod event;
 pub mod input;
+pub mod line_layout;
 pub mod options_dialog;
 pub mod panes;
 pub mod render;

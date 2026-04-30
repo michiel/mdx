@@ -17,6 +17,9 @@ images = ["mdx-core/images", "dep:imagesize"]
 # Core crate
 mdx-core = { path = "../mdx-core" }
 
+# Rope text storage (shared with mdx-core via workspace)
+ropey = { workspace = true }
+
 # Terminal UI
 ratatui = { workspace = true }
 crossterm = { workspace = true }

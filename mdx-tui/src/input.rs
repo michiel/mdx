@@ -1257,8 +1257,9 @@ pub fn handle_input(
         ) {
             app.key_prefix = KeyPrefix::None;
             app.push_jump();
-            app.jump_to_line(0);
-            app.auto_scroll(viewport_height);
+            let pane_id = app.panes.focused;
+            app.goto(pane_id, 0, crate::scroll_math::ScrollPolicy::NearestEdge);
+            let _ = viewport_height;
             return Ok(Action::Continue);
         }
         app.key_prefix = KeyPrefix::None;
@@ -1431,8 +1432,8 @@ pub fn handle_input(
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
             app.push_jump();
-            app.jump_to_line(last_line);
-            app.auto_scroll(pane_height);
+            let pane_id = app.panes.focused;
+            app.goto(pane_id, last_line, crate::scroll_math::ScrollPolicy::NearestEdge);
         }
 
         // Arrow keys - same as j/k for up/down, collapse/expand for left/right
@@ -1513,8 +1514,8 @@ pub fn handle_input(
             ..
         } => {
             app.push_jump();
-            app.jump_to_line(0);
-            app.auto_scroll(pane_height);
+            let pane_id = app.panes.focused;
+            app.goto(pane_id, 0, crate::scroll_math::ScrollPolicy::NearestEdge);
         }
 
         KeyEvent {
@@ -1522,8 +1523,8 @@ pub fn handle_input(
         } => {
             let last_line = app.doc.line_count().saturating_sub(1);
             app.push_jump();
-            app.jump_to_line(last_line);
-            app.auto_scroll(pane_height);
+            let pane_id = app.panes.focused;
+            app.goto(pane_id, last_line, crate::scroll_math::ScrollPolicy::NearestEdge);
         }
 
         _ => {}

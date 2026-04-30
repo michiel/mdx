@@ -266,6 +266,42 @@ fn harness_gg_prefix_requires_two_presses() {
 }
 
 #[test]
+fn harness_search_next_centers_match_in_viewport() {
+    // After /pattern + n, the match should sit roughly in the middle of
+    // the viewport, not at the edge. This validates the ScrollPolicy::Center
+    // wiring in next_search_match.
+    let content = make_long_doc(500);
+    let (mut app, _f) = new_app_with(&content);
+
+    // Seed search_matches directly — we want to avoid the interactive
+    // search-mode keyboard path here.
+    app.search_query = "Line 0300".to_string();
+    app.search_matches = vec![299];
+    app.search_current_match = Some(0);
+
+    // No draw has happened so goto() uses DEFAULT_FALLBACK_HEIGHT (20).
+    // Center → scroll = 299 - 20/2 = 289.
+    app.next_search_match(20);
+
+    let cursor = focused_cursor(&app);
+    let scroll = focused_scroll(&app);
+    assert_eq!(cursor, 299, "cursor should land on the matched line");
+
+    let expected = 289;
+    assert!(
+        scroll.abs_diff(expected) <= 2,
+        "search match should be centered; got scroll={scroll}, expected ~{expected}"
+    );
+    // And critically, the match must fall within the viewport (not at
+    // an edge like NearestEdge would produce).
+    assert!(
+        scroll < cursor && cursor < scroll + 20,
+        "cursor {cursor} should be well inside viewport [{scroll}, {}]",
+        scroll + 20
+    );
+}
+
+#[test]
 fn harness_empty_doc_is_not_panicking_on_pgdn_resize() {
     // Degenerate inputs should not panic.
     let (mut app, _f) = new_app_with("");

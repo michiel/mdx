@@ -105,15 +105,28 @@ pub struct PaneViewport {
     pub content_width: usize,
 }
 
+/// Monotonic generation counter bumped whenever pane geometry changes.
+/// Downstream caches (wrap-height cache, future layout-derived caches)
+/// key by this value and re-compute when it advances. Starts at 1 so a
+/// fresh cache value of 0 always signals "stale".
+pub type LayoutGeneration = u64;
+
 #[derive(Debug, Clone)]
 pub struct LayoutContext {
     viewports: HashMap<PaneId, PaneViewport>,
+    generation: LayoutGeneration,
+    /// Signature of the last layout inputs. If the next `update` call
+    /// produces the same signature we leave `generation` alone — frame
+    /// repaints that don't actually resize shouldn't invalidate caches.
+    last_signature: Option<u64>,
 }
 
 impl LayoutContext {
     pub fn new() -> Self {
         Self {
             viewports: HashMap::new(),
+            generation: 1,
+            last_signature: None,
         }
     }
 
@@ -123,15 +136,44 @@ impl LayoutContext {
         doc_line_count: usize,
         show_scrollbar_flag: bool,
     ) {
+        // Build a stable signature from inputs. Sort by pane id so
+        // HashMap iteration order does not cause spurious bumps.
+        let mut entries: Vec<(&PaneId, &Rect)> = layout.iter().collect();
+        entries.sort_by_key(|(id, _)| **id);
+        let mut sig: u64 = 0;
+        for (id, r) in &entries {
+            sig = sig.wrapping_mul(1315423911).wrapping_add(**id as u64);
+            sig = sig.wrapping_mul(1315423911).wrapping_add(r.x as u64);
+            sig = sig.wrapping_mul(1315423911).wrapping_add(r.y as u64);
+            sig = sig.wrapping_mul(1315423911).wrapping_add(r.width as u64);
+            sig = sig.wrapping_mul(1315423911).wrapping_add(r.height as u64);
+        }
+        sig = sig.wrapping_mul(1315423911).wrapping_add(doc_line_count as u64);
+        sig = sig.wrapping_mul(1315423911).wrapping_add(show_scrollbar_flag as u64);
+
+        let changed = self.last_signature != Some(sig);
+        self.last_signature = Some(sig);
+
         self.viewports.clear();
         for (pane_id, rect) in layout {
             let viewport = PaneViewport::from_rect(*rect, doc_line_count, show_scrollbar_flag);
             self.viewports.insert(*pane_id, viewport);
         }
+
+        if changed {
+            self.generation = self.generation.wrapping_add(1);
+        }
     }
 
     pub fn focused_viewport(&self, pane_id: PaneId) -> Option<PaneViewport> {
         self.viewports.get(&pane_id).copied()
+    }
+
+    /// Current layout generation. Increments whenever the inputs to
+    /// `update` change. Use it to invalidate any cache keyed by pane
+    /// geometry.
+    pub fn generation(&self) -> LayoutGeneration {
+        self.generation
     }
 }
 
@@ -219,6 +261,9 @@ pub struct App {
     pub status_message: Option<(String, StatusMessageKind)>,
     pub mouse_state: MouseState,
     pub layout_context: LayoutContext,
+    /// Wrapped-line height cache. Kept on App so multiple scroll/render
+    /// paths can share the same O(lines)-rebuild amortized work.
+    pub line_layout_cache: crate::line_layout::LineLayoutCache,
     pub visual_command_buffer: String,
     pub command_output: Option<CommandOutput>,
     #[cfg(feature = "watch")]
@@ -299,6 +344,7 @@ impl App {
             status_message: None,
             mouse_state: MouseState::Idle,
             layout_context: LayoutContext::new(),
+            line_layout_cache: crate::line_layout::LineLayoutCache::new(),
             visual_command_buffer: String::new(),
             command_output: None,
             #[cfg(feature = "watch")]
@@ -627,8 +673,74 @@ impl App {
     /// (relative to cursor) and mouse-wheel scroll (relative to viewport top),
     /// so the two input paths cover comparable visual distances on wrapped
     /// content.
+    /// Single jump primitive used by all "move cursor + adjust scroll"
+    /// call sites (G/gg, TOC jump, search next/prev, jump-to-line).
+    ///
+    /// * `pane` — which pane to move. Must exist; no-op otherwise.
+    /// * `target` — target source line. Clamped to the rendered range.
+    /// * `policy` — how the viewport should be positioned around the
+    ///   new cursor. See `scroll_math::ScrollPolicy`.
+    ///
+    /// Also refreshes the TOC auto-selection (via `sync_toc_to_scroll`).
+    pub fn goto(
+        &mut self,
+        pane: crate::panes::PaneId,
+        target: usize,
+        policy: crate::scroll_math::ScrollPolicy,
+    ) {
+        let (bounds_lo, bounds_hi) = self.rendered_content_bounds();
+        let line_count = self.doc.line_count();
+        let visible_height = self
+            .layout_context
+            .focused_viewport(pane)
+            .map(|v| v.visible_height)
+            .unwrap_or(layout_const::DEFAULT_FALLBACK_HEIGHT)
+            .max(1);
+
+        let clamped_target = crate::scroll_math::clamp_cursor(target, bounds_lo, bounds_hi);
+
+        // Expand any collapsed blocks containing the target so the cursor
+        // lands on a visible line. Mirrors jump_to_line's expansion pass.
+        if let Some(p) = self.panes.panes.get_mut(&pane) {
+            loop {
+                let collapsed_ranges = crate::collapse::compute_all_collapsed_ranges(
+                    &p.view.collapsed_headings,
+                    &self.doc,
+                );
+                let containing = collapsed_ranges
+                    .iter()
+                    .find(|r| r.contains_line(clamped_target) || r.start == clamped_target);
+                if let Some(range) = containing {
+                    p.view.collapsed_headings.remove(&range.start);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let Some(p) = self.panes.panes.get_mut(&pane) else { return };
+        let prev_cursor = p.view.cursor_line;
+        let prev_scroll = p.view.scroll_line;
+        p.view.cursor_line = clamped_target;
+        let new_scroll = crate::scroll_math::scroll_for_policy(
+            clamped_target,
+            prev_cursor,
+            prev_scroll,
+            visible_height,
+            bounds_lo,
+            bounds_hi,
+            line_count,
+            policy,
+        );
+        p.view.scroll_line = new_scroll;
+
+        self.enforce_rendered_bounds();
+        self.update_selection();
+        self.sync_toc_to_scroll();
+    }
+
     pub fn visual_delta_to_source_lines(
-        &self,
+        &mut self,
         start_line: usize,
         visual_lines: usize,
         content_width: usize,
@@ -644,34 +756,11 @@ impl App {
         if content_width == 0 {
             return visual_lines;
         }
-        if content_width < layout_const::MIN_WRAP_AWARE_WIDTH {
-            return visual_lines;
-        }
-
-        let mut visual_count = 0usize;
-        let mut source_count = 0usize;
-        while visual_count < visual_lines {
-            let line_idx = if forward {
-                start_line.saturating_add(source_count)
-            } else {
-                match start_line.checked_sub(source_count + 1) {
-                    Some(idx) => idx,
-                    None => break,
-                }
-            };
-            if line_idx >= line_count {
-                break;
-            }
-            let line_len = self.doc.rope.line(line_idx).len_chars();
-            let wrapped = if line_len == 0 {
-                1
-            } else {
-                ((line_len + content_width - 1) / content_width).max(1)
-            };
-            visual_count = visual_count.saturating_add(wrapped);
-            source_count = source_count.saturating_add(1);
-        }
-        source_count.max(1)
+        let gen = self.layout_context.generation();
+        self.line_layout_cache
+            .ensure_for(content_width, self.doc.rev, gen, &self.doc.rope);
+        self.line_layout_cache
+            .advance_visual(start_line, visual_lines, forward)
     }
 
     /// Calculate how many source lines to move for a given visual line count
@@ -1563,7 +1652,7 @@ impl App {
     }
 
     /// Jump to next search match
-    pub fn next_search_match(&mut self, viewport_height: usize) {
+    pub fn next_search_match(&mut self, _viewport_height: usize) {
         if self.search_matches.is_empty() {
             return;
         }
@@ -1572,16 +1661,13 @@ impl App {
             let next_idx = (current_idx + 1) % self.search_matches.len();
             self.search_current_match = Some(next_idx);
             let match_line = self.search_matches[next_idx];
-            let bounds = self.rendered_content_bounds();
-            if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.cursor_line = match_line.clamp(bounds.0, bounds.1);
-            }
-            self.auto_scroll(viewport_height);
+            let pane_id = self.panes.focused;
+            self.goto(pane_id, match_line, crate::scroll_math::ScrollPolicy::Center);
         }
     }
 
     /// Jump to previous search match
-    pub fn prev_search_match(&mut self, viewport_height: usize) {
+    pub fn prev_search_match(&mut self, _viewport_height: usize) {
         if self.search_matches.is_empty() {
             return;
         }
@@ -1594,11 +1680,8 @@ impl App {
             };
             self.search_current_match = Some(prev_idx);
             let match_line = self.search_matches[prev_idx];
-            let bounds = self.rendered_content_bounds();
-            if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.cursor_line = match_line.clamp(bounds.0, bounds.1);
-            }
-            self.auto_scroll(viewport_height);
+            let pane_id = self.panes.focused;
+            self.goto(pane_id, match_line, crate::scroll_math::ScrollPolicy::Center);
         }
     }
 
