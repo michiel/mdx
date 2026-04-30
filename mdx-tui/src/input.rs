@@ -1244,6 +1244,27 @@ pub fn handle_input(
     }
 
     // Handle 'z' prefix for fold commands
+    // g prefix — second 'g' completes gg and jumps to top. Any other
+    // key cancels the prefix and falls through to normal handling.
+    if app.key_prefix == KeyPrefix::G {
+        if matches!(
+            key,
+            KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+        ) {
+            app.key_prefix = KeyPrefix::None;
+            app.push_jump();
+            app.jump_to_line(0);
+            app.auto_scroll(viewport_height);
+            return Ok(Action::Continue);
+        }
+        app.key_prefix = KeyPrefix::None;
+        // Fall through so the user's second key is processed normally.
+    }
+
     if app.key_prefix == KeyPrefix::Z {
         match key {
             // za - toggle fold at cursor
@@ -1392,16 +1413,14 @@ pub fn handle_input(
             app.auto_scroll(pane_height);
         }
 
-        // g - prefix for gg (go to top)
+        // g - prefix for gg (go to top). The second press is handled
+        // earlier via KeyPrefix::G.
         KeyEvent {
             code: KeyCode::Char('g'),
             modifiers: KeyModifiers::NONE,
             ..
         } => {
-            // For now, implement gg as single 'g' (proper prefix state in later enhancement)
-            app.push_jump();
-            app.jump_to_line(0);
-            app.auto_scroll(pane_height);
+            app.key_prefix = KeyPrefix::G;
         }
 
         // G - go to bottom

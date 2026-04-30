@@ -2347,6 +2347,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::KeyPrefix::None => "",
         crate::app::KeyPrefix::CtrlW => "  ^W-",
         crate::app::KeyPrefix::Z => "  z-",
+        crate::app::KeyPrefix::G => "  g-",
     };
 
     let fold_indicator = if app.is_cursor_under_collapsed_heading() {

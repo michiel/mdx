@@ -45,6 +45,7 @@ pub enum KeyPrefix {
     None,
     CtrlW,
     Z, // For fold commands (za, zo, zc, zM, zR)
+    G, // For gg (jump to top). Reserved for future g-prefixed commands.
 }
 
 /// View state for a document viewport

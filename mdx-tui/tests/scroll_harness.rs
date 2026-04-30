@@ -219,7 +219,8 @@ fn harness_gg_respects_front_matter_bounds() {
         press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, 20, 80);
     }
 
-    // gg (implemented as single 'g').
+    // gg — two 'g' presses, per vim convention.
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
     press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
     let c = focused_cursor(&app);
 
@@ -229,6 +230,39 @@ fn harness_gg_respects_front_matter_bounds() {
         c >= 4,
         "gg with skip_front_matter should land at or after line 4, got {c}"
     );
+}
+
+#[test]
+fn harness_gg_prefix_requires_two_presses() {
+    let content = make_long_doc(200);
+    let (mut app, _f) = new_app_with(&content);
+
+    // Move cursor off line 0.
+    for _ in 0..10 {
+        press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, 20, 80);
+    }
+    assert_eq!(focused_cursor(&app), 10);
+
+    // Single 'g' should NOT jump — it should set the g prefix.
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
+    assert_eq!(
+        focused_cursor(&app),
+        10,
+        "single 'g' must not jump in gg-prefix mode"
+    );
+
+    // A non-g key cancels the prefix and is processed normally.
+    press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, 20, 80);
+    assert_eq!(
+        focused_cursor(&app),
+        11,
+        "'j' after 'g' should cancel prefix and move down"
+    );
+
+    // Now the real 'gg' sequence.
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
+    assert_eq!(focused_cursor(&app), 0, "'gg' should jump to top");
 }
 
 #[test]
