@@ -1,3 +1,5 @@
+Don't use a passive voice. Take ownership of mistakes. Example, don't say "sed mangled the file". Say "I manged the file with sed"
+
 # Agent Instructions
 
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.

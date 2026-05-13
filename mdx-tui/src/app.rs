@@ -51,7 +51,9 @@ pub enum KeyPrefix {
 /// View state for a document viewport
 #[derive(Debug, Clone)]
 pub struct ViewState {
-    pub scroll_line: usize,
+    /// Scroll position. Use `.scroll_line()` to read the source-line index;
+    /// write via `.set_scroll_line(x)` or assign `.scroll_pos` directly.
+    pub scroll_pos: crate::scroll_math::VisualPos,
     pub cursor_line: usize,
     pub mode: Mode,
     pub selection: Option<LineSelection>,
@@ -63,13 +65,25 @@ impl ViewState {
     /// Create a new view state at the top of the document
     pub fn new() -> Self {
         Self {
-            scroll_line: 0,
+            scroll_pos: crate::scroll_math::VisualPos::default(),
             cursor_line: 0,
             mode: Mode::Normal,
             selection: None,
             show_raw: false,
             collapsed_headings: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// Source-line index at the top of the viewport.
+    #[inline]
+    pub fn scroll_line(&self) -> usize {
+        self.scroll_pos.source_line
+    }
+
+    /// Set the scroll position to the first visual row of `source_line`.
+    #[inline]
+    pub fn set_scroll_line(&mut self, source_line: usize) {
+        self.scroll_pos = crate::scroll_math::VisualPos::at(source_line);
     }
 }
 
@@ -199,7 +213,7 @@ impl PaneViewport {
 #[derive(Debug, Clone, Copy)]
 pub struct JumpEntry {
     pub pane: PaneId,
-    pub scroll_line: usize,
+    pub scroll_pos: crate::scroll_math::VisualPos,
     pub cursor_line: usize,
 }
 
@@ -411,13 +425,14 @@ impl App {
 
         for (pane_id, pane) in self.panes.panes.iter_mut() {
             let prev_cursor = pane.view.cursor_line;
-            let prev_scroll = pane.view.scroll_line;
+            let prev_scroll = pane.view.scroll_line();
 
             // Clamp cursor to valid bounds
             pane.view.cursor_line = pane.view.cursor_line.clamp(bounds.0, bounds.1);
 
             // Clamp scroll to valid bounds
-            pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, bounds.1);
+            let clamped = pane.view.scroll_line().clamp(bounds.0, bounds.1);
+            pane.view.set_scroll_line(clamped);
 
             // Additional validation: ensure scroll_line doesn't leave viewport mostly empty
             // The scroll should not go beyond (line_count - visible_height) unless document is smaller
@@ -425,20 +440,29 @@ impl App {
             if line_count > 0 {
                 let max_scroll = line_count.saturating_sub(1).max(bounds.0);
                 // If we'd show empty space at the bottom, scroll up
-                if pane.view.scroll_line + visible_height > line_count && line_count >= visible_height
+                if pane.view.scroll_line() + visible_height > line_count && line_count >= visible_height
                 {
-                    pane.view.scroll_line = line_count.saturating_sub(visible_height);
+                    pane.view.set_scroll_line(line_count.saturating_sub(visible_height));
                 }
-                pane.view.scroll_line = pane.view.scroll_line.clamp(bounds.0, max_scroll);
+                let clamped2 = pane.view.scroll_line().clamp(bounds.0, max_scroll);
+                pane.view.set_scroll_line(clamped2);
+
+                // Snap wrap_row to the valid range for the (possibly new) top line.
+                // This is the mdx-irv behavioral fix: after resize, the intra-line
+                // offset stays valid for the new wrap width.
+                let line_h = self
+                    .line_layout_cache
+                    .visual_height_of_line(pane.view.scroll_line());
+                pane.view.scroll_pos.snap_wrap_row(line_h);
             }
 
-            if prev_cursor != pane.view.cursor_line || prev_scroll != pane.view.scroll_line {
+            if prev_cursor != pane.view.cursor_line || prev_scroll != pane.view.scroll_line() {
                 trace!(
                     target: "mdx::scroll",
                     "enforce_bounds: pane={:?} cursor {}->{} scroll {}->{} bounds={:?}",
                     pane_id,
                     prev_cursor, pane.view.cursor_line,
-                    prev_scroll, pane.view.scroll_line,
+                    prev_scroll, pane.view.scroll_line(),
                     bounds
                 );
             }
@@ -734,7 +758,7 @@ impl App {
 
         let Some(p) = self.panes.panes.get_mut(&pane) else { return };
         let prev_cursor = p.view.cursor_line;
-        let prev_scroll = p.view.scroll_line;
+        let prev_scroll = p.view.scroll_line();
         p.view.cursor_line = clamped_target;
         let new_scroll = crate::scroll_math::scroll_for_policy(
             clamped_target,
@@ -746,7 +770,7 @@ impl App {
             line_count,
             policy,
         );
-        p.view.scroll_line = new_scroll;
+        p.view.set_scroll_line(new_scroll);
 
         self.enforce_rendered_bounds();
         self.update_selection();
@@ -886,7 +910,7 @@ impl App {
             return;
         }
         let scroll_line = match self.panes.focused_pane() {
-            Some(p) => p.view.scroll_line,
+            Some(p) => p.view.scroll_line(),
             None => return,
         };
         // Last heading with line <= scroll_line; if none, use first.
@@ -917,7 +941,7 @@ impl App {
         let Some(pane) = self.panes.focused_pane() else { return };
         let entry = JumpEntry {
             pane: pane_id,
-            scroll_line: pane.view.scroll_line,
+            scroll_pos: pane.view.scroll_pos,
             cursor_line: pane.view.cursor_line,
         };
         // If we're not at the tip, drop everything past the cursor — new
@@ -946,7 +970,7 @@ impl App {
             if let Some(pane) = self.panes.focused_pane() {
                 let entry = JumpEntry {
                     pane: self.panes.focused,
-                    scroll_line: pane.view.scroll_line,
+                    scroll_pos: pane.view.scroll_pos,
                     cursor_line: pane.view.cursor_line,
                 };
                 if self.jump_stack.len() >= JUMP_STACK_CAP {
@@ -982,7 +1006,7 @@ impl App {
             self.panes.focused = entry.pane;
         }
         if let Some(pane) = self.panes.focused_pane_mut() {
-            pane.view.scroll_line = entry.scroll_line;
+            pane.view.scroll_pos = entry.scroll_pos;
             pane.view.cursor_line = entry.cursor_line;
         }
         // Re-clamp in case the doc length or layout changed since the
@@ -1013,33 +1037,33 @@ impl App {
 
         if let Some(pane) = self.panes.focused_pane_mut() {
             let cursor = pane.view.cursor_line;
-            let scroll = pane.view.scroll_line;
+            let scroll = pane.view.scroll_line();
 
             // Cursor above viewport - scroll up
             if cursor < scroll {
-                pane.view.scroll_line = cursor;
+                pane.view.set_scroll_line(cursor);
             }
             // Cursor below viewport - scroll down
             else if cursor >= scroll + actual_height {
-                pane.view.scroll_line = cursor.saturating_sub(actual_height.saturating_sub(1));
+                pane.view.set_scroll_line(cursor.saturating_sub(actual_height.saturating_sub(1)));
             }
 
-            if pane.view.scroll_line != scroll {
+            if pane.view.scroll_line() != scroll {
                 trace!(
                     target: "mdx::scroll",
                     "auto_scroll: cursor={} height={} scroll {} -> {}",
-                    cursor, actual_height, scroll, pane.view.scroll_line
+                    cursor, actual_height, scroll, pane.view.scroll_line()
                 );
             }
 
             // Debug assertion: after auto_scroll, cursor should be visible
             debug_assert!(
-                pane.view.cursor_line >= pane.view.scroll_line
-                    && pane.view.cursor_line < pane.view.scroll_line + actual_height,
+                pane.view.cursor_line >= pane.view.scroll_line()
+                    && pane.view.cursor_line < pane.view.scroll_line() + actual_height,
                 "auto_scroll: cursor {} not visible in viewport [{}, {})",
                 pane.view.cursor_line,
-                pane.view.scroll_line,
-                pane.view.scroll_line + actual_height
+                pane.view.scroll_line(),
+                pane.view.scroll_line() + actual_height
             );
         }
         self.sync_toc_to_scroll();
@@ -1150,7 +1174,7 @@ impl App {
             self.jump_to_line(target_line);
             // Set scroll to make heading the top line
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.scroll_line = target_line;
+                pane.view.set_scroll_line(target_line);
             }
             // Suppress the next TOC-tracking update; the scroll moved
             // *because* of this TOC click, so re-selecting would echo.
@@ -1254,7 +1278,7 @@ impl App {
             self.jump_to_line(target_line);
             // Set scroll to make heading the top line
             if let Some(pane) = self.panes.focused_pane_mut() {
-                pane.view.scroll_line = target_line;
+                pane.view.set_scroll_line(target_line);
             }
         }
         // Close the dialog
@@ -2016,7 +2040,7 @@ mod tests {
         app.auto_scroll(viewport_height);
 
         // Scroll should adjust so cursor is at bottom of viewport
-        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 6); // 15 - 9 = 6
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line(), 6); // 15 - 9 = 6
     }
 
     #[test]
@@ -2027,13 +2051,13 @@ mod tests {
         let viewport_height = 10;
 
         // Start scrolled down
-        app.panes.focused_pane_mut().unwrap().view.scroll_line = 20;
+        app.panes.focused_pane_mut().unwrap().view.set_scroll_line(20);
         app.panes.focused_pane_mut().unwrap().view.cursor_line = 15; // Above current scroll
 
         app.auto_scroll(viewport_height);
 
         // Scroll should move up to show cursor
-        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line, 15);
+        assert_eq!(app.panes.focused_pane_mut().unwrap().view.scroll_line(), 15);
     }
 
     #[test]
@@ -2145,7 +2169,7 @@ mod tests {
         // And it should be the top line (scroll = cursor)
         let pane = app.panes.focused_pane().unwrap();
         assert_eq!(pane.view.cursor_line, 2);
-        assert_eq!(pane.view.scroll_line, 2);
+        assert_eq!(pane.view.scroll_line(), 2);
     }
 
     #[test]

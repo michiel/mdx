@@ -10,6 +10,44 @@
 //! typically `front_matter.end_line + 1` and `bounds_hi` is
 //! `line_count - 1`.
 
+/// A scroll position that identifies both which source line is at the top of
+/// the viewport AND which visual wrap-row within that line is first shown.
+///
+/// `wrap_row = 0` means "start from the very first visual row of
+/// `source_line`" — the legacy behaviour. `wrap_row > 0` means the user
+/// has scrolled partway through a wrapped paragraph. This is the type that
+/// replaces the raw `scroll_line: usize` field in `PaneView`.
+///
+/// Only scroll carries a `wrap_row`; the cursor is always source-line
+/// granular because editing / search / TOC operate on source lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VisualPos {
+    /// Index into the rope's line array.
+    pub source_line: usize,
+    /// Which visual row within that source line is shown first (0-based).
+    /// Must always satisfy `wrap_row < visual_height_of_line(source_line)`.
+    pub wrap_row: u16,
+}
+
+impl VisualPos {
+    /// Construct a position pointing at the first visual row of a source line.
+    #[inline]
+    pub fn at(source_line: usize) -> Self {
+        Self { source_line, wrap_row: 0 }
+    }
+
+    /// Snap `wrap_row` into the valid range for a line whose total visual
+    /// height is `line_height`. Called on resize so the stored offset is
+    /// never out-of-bounds for the new wrap width.
+    #[inline]
+    pub fn snap_wrap_row(&mut self, line_height: u16) {
+        let max = line_height.saturating_sub(1);
+        if self.wrap_row > max {
+            self.wrap_row = max;
+        }
+    }
+}
+
 /// Clamp a scroll position to the rendered content range *and* to the last
 /// position that keeps the viewport full (if the document is at least
 /// `visible_height` lines tall).
@@ -192,6 +230,43 @@ pub fn auto_scroll_to_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- VisualPos -----------------------------------------------------------
+
+    #[test]
+    fn visual_pos_at_produces_zero_wrap_row() {
+        let p = VisualPos::at(42);
+        assert_eq!(p.source_line, 42);
+        assert_eq!(p.wrap_row, 0);
+    }
+
+    #[test]
+    fn visual_pos_snap_wrap_row_clamps_to_last_valid_row() {
+        let mut p = VisualPos { source_line: 10, wrap_row: 5 };
+        p.snap_wrap_row(3); // line_height=3, valid rows=0..2 → max=2
+        assert_eq!(p.wrap_row, 2);
+    }
+
+    #[test]
+    fn visual_pos_snap_wrap_row_noop_when_valid() {
+        let mut p = VisualPos { source_line: 10, wrap_row: 1 };
+        p.snap_wrap_row(3);
+        assert_eq!(p.wrap_row, 1);
+    }
+
+    #[test]
+    fn visual_pos_snap_wrap_row_single_row_line() {
+        let mut p = VisualPos { source_line: 0, wrap_row: 3 };
+        p.snap_wrap_row(1); // 1-row line, only valid row is 0
+        assert_eq!(p.wrap_row, 0);
+    }
+
+    #[test]
+    fn visual_pos_default_is_zero() {
+        let p = VisualPos::default();
+        assert_eq!(p.source_line, 0);
+        assert_eq!(p.wrap_row, 0);
+    }
 
     // --- clamp_scroll -----------------------------------------------------
 

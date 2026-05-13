@@ -178,7 +178,7 @@ fn integration_scrolling() {
 
     let pane = app.panes.focused_pane().unwrap();
     let initial_cursor = pane.view.cursor_line;
-    assert_eq!(pane.view.scroll_line, 0);
+    assert_eq!(pane.view.scroll_line(), 0);
 
     // Scroll down half page (viewport_height = 50, viewport_width = 80)
     app.scroll_half_page_down(50, 80);
@@ -278,7 +278,7 @@ fn integration_empty_document() {
 
     let pane = app.panes.focused_pane().unwrap();
     assert_eq!(pane.view.cursor_line, 0);
-    assert_eq!(pane.view.scroll_line, 0);
+    assert_eq!(pane.view.scroll_line(), 0);
 }
 
 #[test]

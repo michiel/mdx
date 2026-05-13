@@ -1736,7 +1736,7 @@ fn handle_mouse_down(
                 if y_in_pane >= content_y_offset {
                     let line_offset = (y_in_pane - content_y_offset) as usize;
                     let clicked_line =
-                        (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
+                        (pane.view.scroll_line() + line_offset).clamp(bounds.0, bounds.1);
 
                     pane.view.cursor_line = clicked_line;
 
@@ -1832,7 +1832,7 @@ fn handle_mouse_drag(
                     if y_in_pane >= content_y_offset {
                         let line_offset = (y_in_pane - content_y_offset) as usize;
                         let current_line =
-                            (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
+                            (pane.view.scroll_line() + line_offset).clamp(bounds.0, bounds.1);
 
                         pane.view.cursor_line = current_line;
                         if let Some(ref mut sel) = pane.view.selection {
@@ -1870,7 +1870,7 @@ fn handle_mouse_drag(
                     if y_in_pane >= content_y_offset {
                         let line_offset = (y_in_pane - content_y_offset) as usize;
                         let current_line =
-                            (pane.view.scroll_line + line_offset).clamp(bounds.0, bounds.1);
+                            (pane.view.scroll_line() + line_offset).clamp(bounds.0, bounds.1);
 
                         // Update cursor and selection
                         pane.view.cursor_line = current_line;
@@ -2007,7 +2007,7 @@ fn handle_scroll(
                 .panes
                 .panes
                 .get(&pane_id)
-                .map(|p| p.view.scroll_line)
+                .map(|p| p.view.scroll_line())
                 .unwrap_or(bounds_lo);
             let source_step = app.visual_delta_to_source_lines(
                 start_scroll,
@@ -2017,8 +2017,8 @@ fn handle_scroll(
             );
 
             if let Some(pane) = app.panes.panes.get_mut(&pane_id) {
-                pane.view.scroll_line = crate::scroll_math::advance_scroll(
-                    pane.view.scroll_line,
+                let new_scroll = crate::scroll_math::advance_scroll(
+                    pane.view.scroll_line(),
                     source_step,
                     delta > 0,
                     bounds_lo,
@@ -2026,11 +2026,12 @@ fn handle_scroll(
                     doc_lines,
                     visible_lines,
                 );
+                pane.view.set_scroll_line(new_scroll);
                 // Keep cursor within the visible window so a later keystroke
                 // does not jerk the viewport back.
                 pane.view.cursor_line = crate::scroll_math::snap_cursor_into_view(
                     pane.view.cursor_line,
-                    pane.view.scroll_line,
+                    pane.view.scroll_line(),
                     visible_lines,
                     bounds_lo,
                     bounds_hi,

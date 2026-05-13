@@ -31,7 +31,7 @@ fn new_app_with(content: &str) -> (App, NamedTempFile) {
 }
 
 fn focused_scroll(app: &App) -> usize {
-    app.panes.focused_pane().unwrap().view.scroll_line
+    app.panes.focused_pane().unwrap().view.scroll_line()
 }
 
 fn focused_cursor(app: &App) -> usize {
@@ -263,6 +263,34 @@ fn harness_gg_prefix_requires_two_presses() {
     press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
     press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, 20, 80);
     assert_eq!(focused_cursor(&app), 0, "'gg' should jump to top");
+}
+
+#[test]
+fn harness_visual_pos_wrap_row_snaps_on_resize() {
+    // Verify that enforce_rendered_bounds clamps scroll_pos.wrap_row when the
+    // line layout changes (simulated by manually setting wrap_row > 0 and
+    // then calling enforce_rendered_bounds with a cache that reports a
+    // 1-row line height).
+    let content = make_long_doc(100);
+    let (mut app, _f) = new_app_with(&content);
+
+    // Artificially set wrap_row to something out-of-range for a 1-row line.
+    {
+        let pane = app.panes.focused_pane_mut().unwrap();
+        pane.view.scroll_pos.source_line = 10;
+        pane.view.scroll_pos.wrap_row = 7; // line_layout_cache says 1 row → invalid
+    }
+
+    // enforce_rendered_bounds snaps wrap_row to the valid range.
+    // The line_layout_cache is unpopulated (no draw), so visual_height_of_line
+    // returns 1, meaning max valid wrap_row = 0.
+    app.enforce_rendered_bounds();
+
+    let wrap = app.panes.focused_pane().unwrap().view.scroll_pos.wrap_row;
+    assert_eq!(
+        wrap, 0,
+        "wrap_row should be snapped to 0 for a 1-row line; got {wrap}"
+    );
 }
 
 #[test]

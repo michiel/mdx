@@ -278,7 +278,7 @@ fn render_markdown(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         None => return,
     };
 
-    let scroll = pane.view.scroll_line;
+    let scroll = pane.view.scroll_line();
     let cursor = pane.view.cursor_line;
     let is_focused = app.panes.focused == pane_id;
 
@@ -1035,7 +1035,7 @@ fn render_scrollbar(
         None => return,
     };
 
-    let scroll = pane.view.scroll_line;
+    let scroll = pane.view.scroll_line();
     let is_focused = app.panes.focused == pane_id;
 
     // Calculate scrollbar dimensions
