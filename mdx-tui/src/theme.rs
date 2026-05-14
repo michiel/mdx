@@ -44,133 +44,150 @@ impl Theme {
         }
     }
 
-    /// Dark theme (default) - Inspired by One Dark Pro / Nord
+    /// Dark theme — Cyberpunk neon palette
+    ///
+    /// Near-black background with high-saturation neon accents. The
+    /// contrast ratios are high enough to be readable; the palette is
+    /// intentionally loud — think terminal circa 2077.
     pub fn dark() -> Self {
         Self {
-            base: Style::default().fg(Color::Rgb(220, 220, 220)), // Soft white
+            // Slightly blue-tinted white on near-black. The explicit bg
+            // ensures pane backgrounds are correct even on non-dark terminals.
+            base: Style::default()
+                .fg(Color::Rgb(220, 220, 255))
+                .bg(Color::Rgb(10, 10, 18)),
             heading: [
-                // H1: Bright blue - highest priority
+                // H1: neon rose / hot pink
                 Style::default()
-                    .fg(Color::Rgb(97, 175, 239))
+                    .fg(Color::Rgb(255, 45, 120))
                     .add_modifier(Modifier::BOLD),
-                // H2: Cyan - secondary
+                // H2: electric cyan
                 Style::default()
-                    .fg(Color::Rgb(86, 182, 194))
+                    .fg(Color::Rgb(0, 229, 255))
                     .add_modifier(Modifier::BOLD),
-                // H3: Green - tertiary
+                // H3: acid green
                 Style::default()
-                    .fg(Color::Rgb(152, 195, 121))
+                    .fg(Color::Rgb(57, 255, 20))
                     .add_modifier(Modifier::BOLD),
-                // H4: Purple - quaternary
+                // H4: electric violet
                 Style::default()
-                    .fg(Color::Rgb(198, 120, 221))
+                    .fg(Color::Rgb(191, 95, 255))
                     .add_modifier(Modifier::BOLD),
-                // H5: Orange
+                // H5: neon orange
                 Style::default()
-                    .fg(Color::Rgb(229, 192, 123))
+                    .fg(Color::Rgb(255, 110, 0))
                     .add_modifier(Modifier::BOLD),
-                // H6: Muted gray-blue
+                // H6: neon yellow
                 Style::default()
-                    .fg(Color::Rgb(150, 160, 180))
+                    .fg(Color::Rgb(255, 230, 0))
                     .add_modifier(Modifier::BOLD),
             ],
-            code: Style::default().fg(Color::Rgb(229, 192, 123)), // Warm amber
-            code_block_bg: Color::Rgb(40, 44, 52),                // Dark background for code blocks
+            code: Style::default().fg(Color::Rgb(255, 210, 0)), // neon amber / gold
+            code_block_bg: Color::Rgb(5, 5, 20),                // deeper blue-black for blocks
             link: Style::default()
-                .fg(Color::Rgb(97, 175, 239)) // Bright blue
+                .fg(Color::Rgb(0, 180, 255)) // electric sky-blue
                 .add_modifier(Modifier::UNDERLINED),
             quote: Style::default()
-                .fg(Color::Rgb(130, 140, 150)) // Readable gray
+                .fg(Color::Rgb(120, 120, 180)) // muted purple-gray, still readable
                 .add_modifier(Modifier::ITALIC),
-            list_marker: Style::default().fg(Color::Rgb(224, 108, 117)), // Soft red
-            toc_bg: Color::Rgb(30, 30, 30),                              // Subtle dark background
-            toc_border: Color::Rgb(60, 60, 60),                          // Visible border
+            list_marker: Style::default().fg(Color::Rgb(255, 45, 120)), // hot pink bullets
+            toc_bg: Color::Rgb(8, 8, 22),
+            toc_border: Color::Rgb(50, 50, 100),
             toc_active: Style::default()
-                .fg(Color::Rgb(30, 30, 30))
-                .bg(Color::Rgb(86, 182, 194)) // Cyan highlight
+                .fg(Color::Rgb(10, 10, 18))
+                .bg(Color::Rgb(0, 229, 255)) // electric cyan highlight
                 .add_modifier(Modifier::BOLD),
-            cursor_line_bg: Color::Rgb(45, 48, 55), // Visible but subtle
-            status_bar_fg: Color::Rgb(220, 220, 220),
-            status_bar_bg: Color::Rgb(52, 61, 70), // Muted blue-gray
-            collapsed_block_bg: Color::Rgb(35, 38, 45), // Slightly darker than normal bg
-            collapsed_indicator_fg: Color::Rgb(86, 182, 194), // Cyan, matches TOC active
-            border: Color::Rgb(60, 60, 60),
-            border_focused: Color::Rgb(97, 175, 239), // Bright blue
-            scrollbar_track: Color::Rgb(50, 50, 50),  // Darker for more contrast
-            scrollbar_track_unfocused: Color::Rgb(45, 45, 45), // Even more subtle
-            scrollbar_thumb: Color::Rgb(97, 175, 239), // Bright blue, matches focused border
-            scrollbar_thumb_unfocused: Color::Rgb(100, 100, 100), // More visible gray
+            cursor_line_bg: Color::Rgb(20, 20, 45), // dark purple-blue glow
+            status_bar_fg: Color::Rgb(10, 10, 18),
+            status_bar_bg: Color::Rgb(0, 229, 255), // electric cyan bar
+            collapsed_block_bg: Color::Rgb(15, 15, 35),
+            collapsed_indicator_fg: Color::Rgb(0, 229, 255),
+            border: Color::Rgb(40, 40, 80),
+            border_focused: Color::Rgb(255, 45, 120), // hot pink focused border
+            scrollbar_track: Color::Rgb(25, 25, 50),
+            scrollbar_track_unfocused: Color::Rgb(18, 18, 36),
+            scrollbar_thumb: Color::Rgb(255, 45, 120), // hot pink thumb
+            scrollbar_thumb_unfocused: Color::Rgb(80, 80, 140),
             #[cfg(feature = "git")]
-            diff_add: Style::default().fg(Color::Rgb(152, 195, 121)), // Softer green
+            diff_add: Style::default().fg(Color::Rgb(57, 255, 20)), // acid green
             #[cfg(feature = "git")]
-            diff_del: Style::default().fg(Color::Rgb(224, 108, 117)), // Softer red
+            diff_del: Style::default().fg(Color::Rgb(255, 45, 120)), // hot pink
             #[cfg(feature = "git")]
-            diff_mod: Style::default().fg(Color::Rgb(229, 192, 123)), // Amber
+            diff_mod: Style::default().fg(Color::Rgb(255, 210, 0)), // neon gold
         }
     }
 
-    /// Light theme - Inspired by GitHub Light / Solarized Light
+    /// Light theme — GitHub Light / Solarized Light palette
+    ///
+    /// The explicit `bg` on `base` is the critical fix: without it ratatui
+    /// inherits the terminal's default background, which on a dark terminal
+    /// makes near-black text invisible. Setting it to near-white ensures the
+    /// pane content area is always readable regardless of terminal theme.
     pub fn light() -> Self {
         Self {
-            base: Style::default().fg(Color::Rgb(36, 41, 46)), // Near-black, easier on eyes
+            base: Style::default()
+                .fg(Color::Rgb(36, 41, 46))   // near-black text
+                .bg(Color::Rgb(255, 255, 255)), // explicit white background — fixes "text disappears"
             heading: [
-                // H1: Deep blue - highest priority
+                // H1: Deep blue
                 Style::default()
                     .fg(Color::Rgb(3, 102, 214))
                     .add_modifier(Modifier::BOLD),
-                // H2: Teal - secondary
+                // H2: Teal
                 Style::default()
-                    .fg(Color::Rgb(0, 128, 128))
+                    .fg(Color::Rgb(0, 112, 120))
                     .add_modifier(Modifier::BOLD),
-                // H3: Forest green - tertiary
+                // H3: Forest green
                 Style::default()
                     .fg(Color::Rgb(34, 134, 58))
                     .add_modifier(Modifier::BOLD),
-                // H4: Purple - quaternary
+                // H4: Purple
                 Style::default()
                     .fg(Color::Rgb(111, 66, 193))
                     .add_modifier(Modifier::BOLD),
                 // H5: Dark orange
                 Style::default()
-                    .fg(Color::Rgb(227, 98, 9))
+                    .fg(Color::Rgb(210, 90, 0))
                     .add_modifier(Modifier::BOLD),
                 // H6: Dark gray
                 Style::default()
                     .fg(Color::Rgb(88, 96, 105))
                     .add_modifier(Modifier::BOLD),
             ],
-            code: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red-brown
-            code_block_bg: Color::Rgb(246, 248, 250),           // Very light gray background
+            code: Style::default()
+                .fg(Color::Rgb(175, 30, 60)) // deep crimson — visible on white
+                .bg(Color::Rgb(255, 245, 248)), // faint pink tint for inline code
+            code_block_bg: Color::Rgb(245, 247, 250), // very light blue-gray for blocks
             link: Style::default()
-                .fg(Color::Rgb(3, 102, 214)) // Deep blue
+                .fg(Color::Rgb(3, 102, 214))
                 .add_modifier(Modifier::UNDERLINED),
             quote: Style::default()
-                .fg(Color::Rgb(106, 115, 125)) // Readable medium gray
+                .fg(Color::Rgb(87, 96, 106)) // medium gray, clearly readable
                 .add_modifier(Modifier::ITALIC),
-            list_marker: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red
-            toc_bg: Color::Rgb(250, 251, 252), // Very light gray, not harsh white
-            toc_border: Color::Rgb(209, 213, 218), // Soft gray border
+            list_marker: Style::default().fg(Color::Rgb(3, 102, 214)), // deep blue bullets
+            toc_bg: Color::Rgb(248, 250, 252),
+            toc_border: Color::Rgb(200, 208, 216),
             toc_active: Style::default()
                 .fg(Color::Rgb(255, 255, 255))
-                .bg(Color::Rgb(3, 102, 214)) // Deep blue highlight
+                .bg(Color::Rgb(3, 102, 214))
                 .add_modifier(Modifier::BOLD),
-            cursor_line_bg: Color::Rgb(240, 246, 252), // Light blue tint
+            cursor_line_bg: Color::Rgb(230, 240, 255), // soft blue highlight
             status_bar_fg: Color::Rgb(255, 255, 255),
-            status_bar_bg: Color::Rgb(36, 41, 46), // Dark background for contrast
-            collapsed_block_bg: Color::Rgb(235, 240, 245), // Slightly darker than normal bg
-            collapsed_indicator_fg: Color::Rgb(0, 128, 128), // Teal, matches H2
-            border: Color::Rgb(209, 213, 218),     // Soft gray border
-            border_focused: Color::Rgb(3, 102, 214), // Deep blue
-            scrollbar_track: Color::Rgb(225, 230, 235), // Lighter for more contrast
-            scrollbar_track_unfocused: Color::Rgb(235, 238, 241), // Very light gray
-            scrollbar_thumb: Color::Rgb(3, 102, 214), // Deep blue, matches focused border
-            scrollbar_thumb_unfocused: Color::Rgb(140, 150, 160), // Darker for visibility
+            status_bar_bg: Color::Rgb(36, 41, 46), // dark status bar keeps the contrast frame
+            collapsed_block_bg: Color::Rgb(232, 238, 245),
+            collapsed_indicator_fg: Color::Rgb(0, 112, 120),
+            border: Color::Rgb(208, 215, 222),
+            border_focused: Color::Rgb(3, 102, 214),
+            scrollbar_track: Color::Rgb(220, 228, 236),
+            scrollbar_track_unfocused: Color::Rgb(232, 237, 242),
+            scrollbar_thumb: Color::Rgb(3, 102, 214),
+            scrollbar_thumb_unfocused: Color::Rgb(140, 152, 165),
             #[cfg(feature = "git")]
-            diff_add: Style::default().fg(Color::Rgb(34, 134, 58)), // Forest green
+            diff_add: Style::default().fg(Color::Rgb(34, 134, 58)),
             #[cfg(feature = "git")]
-            diff_del: Style::default().fg(Color::Rgb(212, 73, 80)), // Warm red
+            diff_del: Style::default().fg(Color::Rgb(200, 30, 50)),
             #[cfg(feature = "git")]
-            diff_mod: Style::default().fg(Color::Rgb(227, 98, 9)), // Dark orange
+            diff_mod: Style::default().fg(Color::Rgb(210, 90, 0)),
         }
     }
 }
