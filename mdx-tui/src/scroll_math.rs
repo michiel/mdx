@@ -48,25 +48,23 @@ impl VisualPos {
     }
 }
 
-/// Clamp a scroll position to the rendered content range *and* to the last
-/// position that keeps the viewport full (if the document is at least
-/// `visible_height` lines tall).
+/// Clamp a scroll position to the rendered content range.
+///
+/// The `line_count` and `visible_height` parameters are accepted for
+/// compatibility but no longer enforce the "keep viewport full" constraint.
+/// That constraint prevented the user from scrolling to see the last lines
+/// of a document when source lines wrap to multiple visual rows (the
+/// renderer would show fewer lines than `visible_height` source lines), so
+/// we allow scrolling all the way to `bounds_hi` (the last source line).
 pub fn clamp_scroll(
     scroll_line: usize,
     bounds_lo: usize,
     bounds_hi: usize,
-    line_count: usize,
-    visible_height: usize,
+    _line_count: usize,
+    _visible_height: usize,
 ) -> usize {
     let bounds_hi = bounds_hi.max(bounds_lo);
-    let mut s = scroll_line.clamp(bounds_lo, bounds_hi);
-    if line_count >= visible_height && visible_height > 0 {
-        let max_keep_full = line_count.saturating_sub(visible_height);
-        if s > max_keep_full {
-            s = max_keep_full.max(bounds_lo);
-        }
-    }
-    s
+    scroll_line.clamp(bounds_lo, bounds_hi)
 }
 
 /// Clamp a cursor position into the rendered content range.
@@ -277,13 +275,18 @@ mod tests {
 
     #[test]
     fn clamp_scroll_respects_bounds_hi() {
-        assert_eq!(clamp_scroll(200, 0, 99, 100, 20), 80);
+        // bounds_hi is 99; value above it clamps to 99.
+        assert_eq!(clamp_scroll(200, 0, 99, 100, 20), 99);
     }
 
     #[test]
-    fn clamp_scroll_keeps_viewport_full() {
-        // 100 lines, visible 20 → max scroll is 80 so last row is line 99.
-        assert_eq!(clamp_scroll(95, 0, 99, 100, 20), 80);
+    fn clamp_scroll_allows_scroll_to_doc_end() {
+        // 100 lines, visible 20. User should be able to scroll to line 99
+        // (last source line at top), even though it leaves empty space below.
+        // This is the vim-style behaviour that fixes the "can't reach end"
+        // bug when source lines wrap to multiple visual rows.
+        assert_eq!(clamp_scroll(95, 0, 99, 100, 20), 95);
+        assert_eq!(clamp_scroll(99, 0, 99, 100, 20), 99);
     }
 
     #[test]
@@ -367,8 +370,8 @@ mod tests {
 
     #[test]
     fn advance_scroll_clamps_at_end() {
-        // 100-line doc, 20 visible → max scroll 80.
-        assert_eq!(advance_scroll(70, 50, true, 0, 99, 100, 20), 80);
+        // 100-line doc, bounds_hi=99 → max scroll is 99 (last source line).
+        assert_eq!(advance_scroll(70, 50, true, 0, 99, 100, 20), 99);
     }
 
     #[test]
@@ -423,8 +426,9 @@ mod tests {
 
     #[test]
     fn auto_scroll_end_of_doc_clamps() {
-        // cursor at last line; scroll would go to 99 - 19 = 80, which is
-        // the clamp_scroll "keep viewport full" cap — same value.
+        // cursor at last line (99); scroll goes to 99 - 19 = 80, clamped to
+        // bounds_hi (99). The "keep viewport full" cap is gone — users can
+        // now always scroll to the last source line.
         assert_eq!(auto_scroll_to_cursor(99, 0, 20, 0, 99, 100), 80);
     }
 
@@ -476,9 +480,10 @@ mod tests {
 
     #[test]
     fn policy_center_clamps_at_doc_end() {
-        // target 99, visible 20, half=10 → 89. But clamp_scroll caps at 80.
+        // target 99, visible 20, half=10 → 89. clamp_scroll allows up to
+        // bounds_hi=99, so scroll lands at 89 (cursor centered in viewport).
         let s = scroll_for_policy(99, 0, 0, 20, 0, 99, 100, ScrollPolicy::Center);
-        assert_eq!(s, 80);
+        assert_eq!(s, 89);
     }
 
     // --- Table-driven test matrix mirroring review.md §6 -----------------
@@ -519,21 +524,18 @@ mod tests {
 
     #[test]
     fn test_matrix_resize_smaller_while_at_bottom() {
-        // Before resize: 100 lines, 20 visible, scrolled to 80 (max).
-        // After resize: 10 visible. max_scroll becomes 90.
-        // clamp_scroll leaves 80 alone (still valid, still fills viewport).
+        // Without the keep-full constraint, clamp_scroll only clips to
+        // bounds_hi. Both values are within [0, 99] so they pass through.
         assert_eq!(clamp_scroll(80, 0, 99, 100, 10), 80);
-        // If the user had clicked past the end somehow to 95, that gets
-        // pulled back when the viewport is still tall enough to show the
-        // whole tail region.
-        assert_eq!(clamp_scroll(95, 0, 99, 100, 20), 80);
+        assert_eq!(clamp_scroll(95, 0, 99, 100, 20), 95);
     }
 
     #[test]
     fn test_matrix_reload_shorter_doc_clamps() {
         // Doc shrank from 1000 lines to 50. cursor at 800, scroll at 900.
         assert_eq!(clamp_cursor(800, 0, 49), 49);
-        assert_eq!(clamp_scroll(900, 0, 49, 50, 20), 30);
+        // scroll 900 clamped to bounds_hi=49.
+        assert_eq!(clamp_scroll(900, 0, 49, 50, 20), 49);
     }
 
     #[test]
