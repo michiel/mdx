@@ -15,12 +15,12 @@ pub enum Action {
     Redraw,
 }
 
-/// Handle a key event with viewport dimensions for scroll commands
+/// Handle a key event. Viewport dimensions come from `ctx`, which is
+/// computed once per tick after the draw populates the layout context.
 pub fn handle_input(
     app: &mut App,
     key: KeyEvent,
-    viewport_height: usize,
-    viewport_width: usize,
+    ctx: &crate::app::ScrollContext,
 ) -> Result<Action> {
     // Clear status message on any keystroke (except pure modifiers)
     // This ensures messages don't persist indefinitely
@@ -33,20 +33,19 @@ pub fn handle_input(
         return Ok(Action::Continue);
     }
 
-    // Get pane viewport dimensions, refreshing layout context if stale
-    let pane_viewport = app.focused_viewport();
-    let (pane_height, pane_width) = if let Some(vp) = pane_viewport.filter(|v| v.visible_height > 0)
-    {
-        (vp.visible_height, vp.content_width)
-    } else {
-        // Layout context is stale or missing - refresh it
-        app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
-        // Try again after refresh
-        app.focused_viewport()
-            .filter(|v| v.visible_height > 0)
-            .map(|v| (v.visible_height, v.content_width))
-            .unwrap_or((viewport_height, viewport_width))
-    };
+    // Resolve pane dimensions from the pre-computed context.
+    // If the layout context was not yet populated (first tick), do a
+    // one-shot refresh with the raw terminal size from ctx.
+    let (pane_height, pane_width) =
+        if let Some(vp) = ctx.viewport.filter(|v| v.visible_height > 0) {
+            (vp.visible_height, vp.content_width)
+        } else {
+            app.refresh_layout_context_with_area(ctx.term_width, ctx.term_height);
+            app.focused_viewport()
+                .filter(|v| v.visible_height > 0)
+                .map(|v| (v.visible_height, v.content_width))
+                .unwrap_or((ctx.visible_height(), ctx.content_width()))
+        };
 
     if let Some(pane) = app.panes.focused_pane() {
         if pane.view.mode == crate::app::Mode::VisualLine
@@ -360,7 +359,7 @@ pub fn handle_input(
 
     // Handle TOC dialog
     if app.show_toc_dialog {
-        let dialog_height = viewport_height;
+        let dialog_height = ctx.visible_height();
 
         match key {
             // j or Down - move down in TOC dialog
@@ -524,7 +523,7 @@ pub fn handle_input(
             } => {
                 app.split_focused(SplitDir::Horizontal);
                 // Refresh layout context immediately so subsequent commands use correct pane sizes
-                app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
+                app.refresh_layout_context_with_area(ctx.term_width, ctx.term_height);
                 app.key_prefix = KeyPrefix::None;
                 return Ok(Action::Continue);
             }
@@ -537,7 +536,7 @@ pub fn handle_input(
             } => {
                 app.split_focused(SplitDir::Vertical);
                 // Refresh layout context immediately so subsequent commands use correct pane sizes
-                app.refresh_layout_context_with_area(viewport_width as u16, viewport_height as u16);
+                app.refresh_layout_context_with_area(ctx.term_width, ctx.term_height);
                 app.key_prefix = KeyPrefix::None;
                 return Ok(Action::Continue);
             }
@@ -895,8 +894,7 @@ pub fn handle_input(
 
     // Handle TOC-specific keys when TOC is focused
     if app.toc_focus {
-        // TOC viewport height is similar to main viewport
-        let toc_height = viewport_height;
+        let toc_height = ctx.visible_height();
 
         match key {
             // j - move down in TOC
@@ -1259,7 +1257,6 @@ pub fn handle_input(
             app.push_jump();
             let pane_id = app.panes.focused;
             app.goto(pane_id, 0, crate::scroll_math::ScrollPolicy::NearestEdge);
-            let _ = viewport_height;
             return Ok(Action::Continue);
         }
         app.key_prefix = KeyPrefix::None;
@@ -1546,8 +1543,7 @@ enum HitTarget {
 pub fn handle_mouse(
     app: &mut App,
     mouse: MouseEvent,
-    viewport_height: usize,
-    _viewport_width: usize,
+    _ctx: &crate::app::ScrollContext,
 ) -> Result<()> {
     let MouseEvent {
         kind, column, row, ..
@@ -1563,19 +1559,19 @@ pub fn handle_mouse(
 
     match kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_mouse_down(app, column, row, &layout_info, viewport_height)?;
+            handle_mouse_down(app, column, row, &layout_info, 0)?;
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            handle_mouse_drag(app, column, row, &layout_info, viewport_height)?;
+            handle_mouse_drag(app, column, row, &layout_info, 0)?;
         }
         MouseEventKind::Up(MouseButton::Left) => {
             handle_mouse_up(app)?;
         }
         MouseEventKind::ScrollDown => {
-            handle_scroll(app, column, row, &layout_info, viewport_height, 3)?;
+            handle_scroll(app, column, row, &layout_info, 0, 3)?;
         }
         MouseEventKind::ScrollUp => {
-            handle_scroll(app, column, row, &layout_info, viewport_height, -3)?;
+            handle_scroll(app, column, row, &layout_info, 0, -3)?;
         }
         _ => {
             // Ignore other mouse events

@@ -52,22 +52,16 @@ pub fn run(mut app: App) -> Result<()> {
 }
 
 fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
-    use app::layout_const::{PANE_BORDER_COLS, PANE_BORDER_ROWS, STATUS_BAR_ROWS};
     loop {
-        // Get terminal size for viewport calculations.
-        // Prefer the focused pane's visible_height (pane-aware); the values
-        // computed here are a fallback for code paths that haven't been
-        // migrated and for initial bootstrapping before a draw.
         let term_size = terminal.size()?;
-        let viewport_height = term_size
-            .height
-            .saturating_sub(STATUS_BAR_ROWS + PANE_BORDER_ROWS) as usize;
-        let viewport_width = term_size.width.saturating_sub(PANE_BORDER_COLS) as usize;
 
-        // Draw UI
+        // Draw UI (this populates app.layout_context for the current frame).
         terminal
             .draw(|frame| ui::draw(frame, app))
             .context("Failed to draw frame")?;
+
+        // Build the scroll context after the draw so layout_context is fresh.
+        let ctx = app::ScrollContext::from_app(app, term_size.width, term_size.height);
 
         // Check if we should quit
         if app.should_quit {
@@ -90,7 +84,7 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                     // Only handle key press events, ignore release
                     if key.kind == KeyEventKind::Press {
                         let action =
-                            input::handle_input(app, key, viewport_height, viewport_width)?;
+                            input::handle_input(app, key, &ctx)?;
 
                         // Handle special actions
                         match action {
@@ -124,7 +118,7 @@ fn run_loop(terminal: &mut terminal::Tui, app: &mut App) -> Result<()> {
                     }
                 }
                 Event::Mouse(mouse_event) => {
-                    input::handle_mouse(app, mouse_event, viewport_height, viewport_width)?;
+                    input::handle_mouse(app, mouse_event, &ctx)?;
                 }
                 Event::Resize(width, height) => {
                     app.on_resize(width, height);

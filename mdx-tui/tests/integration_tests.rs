@@ -398,6 +398,7 @@ fn integration_render_fills_viewport_when_skipping_fences() {
 #[test]
 fn integration_q_does_not_quit_in_search_mode() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mdx_tui::app::{PaneViewport, ScrollContext};
     use mdx_tui::input::{handle_input, Action};
 
     let content = "# Test Document\n\nSome content here.\n";
@@ -407,8 +408,13 @@ fn integration_q_does_not_quit_in_search_mode() {
     app.enter_search_mode();
 
     // Press 'q' - should add to search query, not quit
+    let ctx = ScrollContext {
+        viewport: Some(PaneViewport { visible_height: 20, content_width: 80 }),
+        term_width: 82,
+        term_height: 23,
+    };
     let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-    let action = handle_input(&mut app, key, 20, 80).expect("handle_input failed");
+    let action = handle_input(&mut app, key, &ctx).expect("handle_input failed");
 
     assert_eq!(action, Action::Continue, "'q' should not quit in search mode");
     assert!(!app.should_quit, "app should not be marked for quit");
@@ -418,6 +424,7 @@ fn integration_q_does_not_quit_in_search_mode() {
 #[test]
 fn integration_q_does_not_quit_in_visual_line_mode() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mdx_tui::app::{PaneViewport, ScrollContext};
     use mdx_tui::input::{handle_input, Action};
 
     let content = "Line 1\nLine 2\nLine 3\n";
@@ -427,8 +434,13 @@ fn integration_q_does_not_quit_in_visual_line_mode() {
     app.enter_visual_line_mode();
 
     // Press 'q' - should be ignored (not quit)
+    let ctx = ScrollContext {
+        viewport: Some(PaneViewport { visible_height: 20, content_width: 80 }),
+        term_width: 82,
+        term_height: 23,
+    };
     let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-    let action = handle_input(&mut app, key, 20, 80).expect("handle_input failed");
+    let action = handle_input(&mut app, key, &ctx).expect("handle_input failed");
 
     assert_eq!(
         action,

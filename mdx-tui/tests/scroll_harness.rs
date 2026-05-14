@@ -39,8 +39,13 @@ fn focused_cursor(app: &App) -> usize {
 }
 
 fn press(app: &mut App, code: KeyCode, mods: KeyModifiers, vh: usize, vw: usize) {
+    let ctx = mdx_tui::app::ScrollContext {
+        viewport: Some(mdx_tui::app::PaneViewport { visible_height: vh, content_width: vw }),
+        term_width: (vw + 2) as u16,
+        term_height: (vh + 3) as u16,
+    };
     let ev = KeyEvent::new(code, mods);
-    handle_input(app, ev, vh, vw).expect("handle_input failed");
+    handle_input(app, ev, &ctx).expect("handle_input failed");
 }
 
 #[test]

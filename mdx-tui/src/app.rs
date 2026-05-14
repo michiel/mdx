@@ -209,6 +209,59 @@ impl PaneViewport {
     }
 }
 
+/// Resolved viewport context for the focused pane, computed once per
+/// event-loop tick (after the draw that populates `layout_context`) and
+/// passed to input handlers. Removes the need for handlers to re-derive
+/// dimensions from raw terminal size and eliminates the double-subtraction
+/// bug that occurred when the cold-path refresh received pre-subtracted
+/// values.
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollContext {
+    /// Viewport of the focused pane.  `None` before the first draw.
+    pub viewport: Option<PaneViewport>,
+    /// Raw terminal dimensions used only for the cold-path layout refresh.
+    pub term_width: u16,
+    pub term_height: u16,
+}
+
+impl ScrollContext {
+    /// Construct from the current app state and the raw terminal size.
+    pub fn from_app(app: &App, term_width: u16, term_height: u16) -> Self {
+        Self {
+            viewport: app.focused_viewport(),
+            term_width,
+            term_height,
+        }
+    }
+
+    /// Resolved visible height: layout-context value when available, otherwise
+    /// an estimate from raw terminal size (status bar + pane borders removed).
+    pub fn visible_height(&self) -> usize {
+        self.viewport
+            .map(|v| v.visible_height)
+            .filter(|&h| h > 0)
+            .unwrap_or_else(|| {
+                self.term_height
+                    .saturating_sub(
+                        layout_const::STATUS_BAR_ROWS + layout_const::PANE_BORDER_ROWS,
+                    )
+                    .into()
+            })
+    }
+
+    /// Resolved content width.
+    pub fn content_width(&self) -> usize {
+        self.viewport
+            .map(|v| v.content_width)
+            .filter(|&w| w > 0)
+            .unwrap_or_else(|| {
+                self.term_width
+                    .saturating_sub(layout_const::PANE_BORDER_COLS)
+                    .into()
+            })
+    }
+}
+
 /// One entry on the jump-back stack (Ctrl-O / Ctrl-I).
 #[derive(Debug, Clone, Copy)]
 pub struct JumpEntry {
